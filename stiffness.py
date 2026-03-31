@@ -3,32 +3,59 @@ import numpy as np
 from scipy.sparse import lil_matrix
 
 
-def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, kappa_fun, rhs_fun):
+import numpy as np
+from scipy.sparse import lil_matrix
+
+
+def assemble_stiffness_and_rhs(nn, elemTags, conn, jac, det, xphys, w, N, gN, kappa_fun, rhs_fun):
     """
-    Assemble global stiffness matrix and load vector for:
-        -d/dx (kappa(x) du/dx) = f(x)
+    Objects:
+    --------
+    coords_nodes : (nn, 3)
+        Global node coordinates
 
-    K_ij = ∫ kappa * grad(N_i)·grad(N_j) dx
-    F_i  = ∫ f * N_i dx
+    conn : (ne, nloc)
+        conn[e, a] = global index of local node a in element e
 
-    Notes:
-    - gmsh gives gN in reference coordinates; we map with inv(J).
-    - For 1D line embedded in 3D, gmsh provides a 3x3 Jacobian; we keep the same approach.
+    xi : (ngp, dim)
+        Gauss points in reference element
 
-    Returns
-    -------
-    K : lil_matrix (nn x nn)
-    F : ndarray (nn,)
+    w : (ngp,)
+        Quadrature weights
+
+    N : (ngp, nloc)
+        Basis functions at Gauss points
+        N[g, a] = φ_a(ξ_g)
+
+    gN : (ngp, nloc, dim)
+        Gradients of basis functions in reference coords
+        (NOT physical gradients)
+
+    jac : (ne, ngp, 3, 3)
+        Jacobian of mapping
+
+    det : (ne, ngp)
+        Determinant of Jacobian
+
+    xphys : (ne, ngp, 3)
+        Physical coordinates of Gauss points
+
+    K[Ia, Ib] += ∫ kappa * grad φ_a · grad φ_b
+    F[Ia]     += ∫ f * φ_a
     """
     ne = len(elemTags)
     ngp = len(w)
-    nloc = int(len(conn) // ne)
-    nn = int(np.max(conn))
+
+    conn = np.asarray(conn, dtype=np.int64)
+    if conn.ndim == 1:
+        nloc = len(conn) // ne
+        conn = conn.reshape(ne, nloc)
+    else:
+        nloc = conn.shape[1]
 
     det = np.asarray(det, dtype=np.float64).reshape(ne, ngp)
     xphys = np.asarray(xphys, dtype=np.float64).reshape(ne, ngp, 3)
     jac = np.asarray(jac, dtype=np.float64).reshape(ne, ngp, 3, 3)
-    conn = np.asarray(conn, dtype=np.int64).reshape(ne, nloc)
     N = np.asarray(N, dtype=np.float64).reshape(ngp, nloc)
     gN = np.asarray(gN, dtype=np.float64).reshape(ngp, nloc, 3)
 
@@ -36,7 +63,7 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, kappa_
     F = np.zeros(nn, dtype=np.float64)
 
     for e in range(ne):
-        nodes = conn[e, :] - 1
+        nodes = conn[e, :] 
         for g in range(ngp):
             xg = xphys[e, g]
             wg = w[g]
@@ -50,10 +77,10 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, kappa_
                 Ia = int(nodes[a])
                 F[Ia] += wg * f_g * N[g, a] * detg
 
-                gradNa = invjacg @ gN[g, a]
+                gradNa = invjacg.T @ gN[g, a]
                 for b in range(nloc):
                     Ib = int(nodes[b])
-                    gradNb = invjacg @ gN[g, b]
-                    K[Ia, Ib] += wg * kappa_g * float(np.dot(gradNa, gradNb)) * detg
+                    gradNb = invjacg.T @ gN[g, b]
+                    K[Ia, Ib] += wg * kappa_g * np.dot(gradNa, gradNb) * detg
 
     return K, F

@@ -14,38 +14,32 @@ from errors import compute_L2_H1_errors
 
 from plot_utils import plot_fe_solution_high_order
 
-def computeErrors1d(elemType, elemTags, elemNodeTags, U, order, u_exact,grad_exact) :
-    xi, w, N, gN = prepare_quadrature_and_basis(elemType, order)
-    jac, det, coords = get_jacobians(elemType, xi)
-    errL2, errH1s, errH1 = compute_L2_H1_errors(
-        elemType, elemTags, elemNodeTags, U,
-        xi, w, N, gN, jac, det, coords,
-        u_exact=u_exact,
-        grad_exact=grad_exact  # or None for numerical gradient
-    )    
-    return errL2, errH1s, errH1
+def main(geo_filename, L, order):
 
-def main(geo_filename, cl1, cl2, L, order):
-
-    gmsh_init("poisson_1d")
-    _, elemType, _, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(geo_filename, L, order)
+    gmsh_init("poisson_2d")
+    elemType, nodeTags, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(geo_filename, L, order)
+    coords_nodes, elements, elements_idx = format_2d_mesh(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags)
 
     xi, w, N, gN = prepare_quadrature_and_basis(elemType, order)
-    jac, det, coords = get_jacobians(elemType, xi)
+    jac, det, coords_gp = get_jacobians(elemType, xi)
 
-    # TO CHANGE
-    MM = 5.0
-    def u_exact(x): return np.sin(MM*np.pi * x[0])
-    def kappa(x): return 1.0
-    def f(x): return (MM*MM*np.pi*np.pi)*np.sin(MM*np.pi*x[0])
-    def grad_exact(x): return np.array([MM*np.pi*np.cos(MM*np.pi*x[0]), 0.0, 0.0])
+    kappa = lambda x: 1.0
+    f = lambda x: 1.0
 
-    K_lil, F = assemble_stiffness_and_rhs(elemTags, elemNodeTags, jac, det, coords, w, N, gN, kappa, f)
+    K_lil, F = assemble_stiffness_and_rhs(
+    coords_nodes.shape[0],
+    elemTags,
+    elements_idx,
+    jac,
+    det,
+    coords_gp,
+    w,
+    N,
+    gN,
+    kappa,
+    f
+)
     K = K_lil.tocsr()
-
-    left, right = end_dofs_from_nodes(nodeCoords)
-    dir_dofs = [left, right]
-    dir_vals = [u_exact([0.0]), u_exact([L])]
 
     U = solve_dirichlet(K, F, dir_dofs, dir_vals)
 

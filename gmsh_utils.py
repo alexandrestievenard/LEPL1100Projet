@@ -53,18 +53,7 @@ def get_jacobians(elemType, xi):
     jacobians, dets, coords = gmsh.model.mesh.getJacobians(elemType, xi)
     return jacobians, dets, coords
 
-
-def end_dofs_from_nodes(nodeCoords):
-    """
-    Robustly identify first/last node dofs from coordinates (x-min, x-max).
-    nodeCoords is flattened [x0,y0,z0, x1,y1,z1, ...]
-    Returns (left_dof, right_dof) as 0-based indices.
-    """
-    X = np.asarray(nodeCoords, dtype=float).reshape(-1, 3)[:, 0]
-    left = int(np.argmin(X))
-    right = int(np.argmax(X))
-    return left, right
-
+def get_number_of_elements(elemType, )
 
 def build_2d_mesh(geo_filename, mesh_size, order=1):
     """
@@ -132,15 +121,16 @@ def format_2d_mesh(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags):
     with x3 = coords[elements_idx[0][2]]
     """
     # Reshape arrays to convenient format
-    coords = nodeCoords.reshape(-1,3)
-    elements = elemNodeTags.reshape(-1,3)
+    coords = nodeCoords.reshape(-1, 3)
 
-    # Convert tags to indices
+    n_elem = len(elemTags)
+    nloc = len(elemNodeTags) // n_elem
+    elements = elemNodeTags.reshape(n_elem, nloc)
+
     tag_to_index = {tag: i for i, tag in enumerate(nodeTags)}
-    
-    # Convert elements[tag] to elements[idx] where idx is index in coords
-    elements_idx = [
-    [tag_to_index[tag] for tag in triangle]
-    for triangle in elements
-    ]
+    elements_idx = np.array([
+        [tag_to_index[tag] for tag in elem]
+        for elem in elements
+    ], dtype=int)
+
     return coords, elements, elements_idx
