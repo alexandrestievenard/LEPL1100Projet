@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import gmsh
 
 from gmsh_utils import (
-    gmsh_init, gmsh_finalize, build_1d_mesh, build_2d_mesh,
+    gmsh_init, gmsh_finalize, build_1d_mesh, build_2d_mesh, format_2d_mesh,
     prepare_quadrature_and_basis, get_jacobians, end_dofs_from_nodes
 )
 from stiffness import assemble_stiffness_and_rhs
@@ -25,10 +25,10 @@ def computeErrors1d(elemType, elemTags, elemNodeTags, U, order, u_exact,grad_exa
     )    
     return errL2, errH1s, errH1
 
-def main(cl1, cl2, L, order):
+def main(geo_filename, cl1, cl2, L, order):
 
     gmsh_init("poisson_1d")
-    _, elemType, _, nodeCoords, elemTags, elemNodeTags = build_1d_mesh(L, cl1, cl2, order)
+    _, elemType, _, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(geo_filename, L, order)
 
     xi, w, N, gN = prepare_quadrature_and_basis(elemType, order)
     jac, det, coords = get_jacobians(elemType, xi)
@@ -84,10 +84,12 @@ if __name__ == "__main__":
 
     elemType, nodeTags, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(
         "square.geo",
-        mesh_size=0.10,
+        mesh_size=1,
         order=1
     )
-
-    gmsh.write("mesh2d.msh")
-    gmsh.fltk.run()
-    gmsh.finalize()
+    
+    coords, elements, elements_idx = format_2d_mesh(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags)
+    print("\n----------------elements--------------------\n")
+    print(elements)
+    print("\n----------------elements_idx--------------------\n")
+    print(elements_idx)

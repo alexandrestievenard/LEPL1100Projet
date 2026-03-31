@@ -116,3 +116,31 @@ def build_2d_mesh(geo_filename, mesh_size, order=1):
     elemTags, elemNodeTags = gmsh.model.mesh.getElementsByType(elemType)
 
     return elemType, nodeTags, nodeCoords, elemTags, elemNodeTags
+
+def format_2d_mesh(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags):
+    """
+    Helper function to convert raw arrays from build_2d_mesh in easier format:
+    - coords: [(x1,y1,z1), (x2,y2,z3), ...]
+    - elements: [(e1tag1,e1tag2,e1tag3), (e2tag1,e2tag2,e2tag3), ...]
+    - elements_idx: [(e1idx1,e1idx2,e1idx3), ...]
+
+    Example : to know coordinates of nodes of first triangle we can simply do:
+    coords[elements_idx[0]]
+
+    with x1 = coords[elements_idx[0][0]]
+    with x2 = coords[elements_idx[0][1]]
+    with x3 = coords[elements_idx[0][2]]
+    """
+    # Reshape arrays to convenient format
+    coords = nodeCoords.reshape(-1,3)
+    elements = elemNodeTags.reshape(-1,3)
+
+    # Convert tags to indices
+    tag_to_index = {tag: i for i, tag in enumerate(nodeTags)}
+    
+    # Convert elements[tag] to elements[idx] where idx is index in coords
+    elements_idx = [
+    [tag_to_index[tag] for tag in triangle]
+    for triangle in elements
+    ]
+    return coords, elements, elements_idx
