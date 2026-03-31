@@ -2,9 +2,10 @@
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+import gmsh
 
 from gmsh_utils import (
-    gmsh_init, gmsh_finalize, build_1d_mesh,
+    gmsh_init, gmsh_finalize, build_1d_mesh, build_2d_mesh,
     prepare_quadrature_and_basis, get_jacobians, end_dofs_from_nodes
 )
 from stiffness import assemble_stiffness_and_rhs
@@ -75,4 +76,18 @@ if __name__ == "__main__":
     L = args.L
     cl1 = args.cl1
     cl2 = args.cl2
-    errL2, errH1s, errH1 = main(cl1, cl2, L, order)
+
+    #errL2, errH1s, errH1 = main(cl1, cl2, L, order)
+
+    # Visualize 2D grid
+    gmsh.initialize()
+
+    elemType, nodeTags, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(
+        "square.geo",
+        mesh_size=0.10,
+        order=1
+    )
+
+    gmsh.write("mesh2d.msh")
+    gmsh.fltk.run()
+    gmsh.finalize()
