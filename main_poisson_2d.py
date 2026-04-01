@@ -10,6 +10,7 @@ from gmsh_utils import (
 from stiffness import assemble_stiffness_and_rhs
 from dirichlet import solve_dirichlet
 from plot_utils import plot_solution_2d
+from errors import compute_L2_H1_errors, convergence_rates
 
 
 def boundary_dofs_square(coords_nodes, L, tol=1e-12):
@@ -26,28 +27,26 @@ def boundary_dofs_square(coords_nodes, L, tol=1e-12):
 
 
 def u_exact(x):
-    return x[0]**2 + x[1]**2
+    return np.sin(np.pi*x[0]) * np.sin(np.pi*x[1])
 
 def grad_exact(x):
-    return np.array([2*x[0], 2*x[1], 0.0])
+    return np.array([
+        np.pi*np.cos(np.pi*x[0]) * np.sin(np.pi*x[1]),
+        np.pi*np.sin(np.pi*x[0]) * np.cos(np.pi*x[1]),
+        0.0
+    ])
 
 def rhs_fun(x):
-    return -4.0
+    return 2.0 * np.pi**2 * np.sin(np.pi*x[0]) * np.sin(np.pi*x[1])
 
 
 def kappa_fun(x):
     return 1.0
 
 
-def convergence_rates(hs, errs):
-    rates = [np.nan]
-    for i in range(1, len(errs)):
-        r = np.log(errs[i-1] / errs[i]) / np.log(hs[i-1] / hs[i])
-        rates.append(r)
-    return rates
 
 
-def main(geo_filename, mesh_size, order, L):
+def main(geo_filename, mesh_size, order, L, do_plot=False):
     gmsh_init("poisson_2d")
 
     elemType, nodeTags, nodeCoords, elemTags, elemNodeTags = build_2d_mesh(
@@ -56,7 +55,6 @@ def main(geo_filename, mesh_size, order, L):
     coords_nodes, elements, elements_idx = format_2d_mesh(
         nodeTags, nodeCoords, elemTags, elemNodeTags
     )
-
 
     xi, w, N, gN = prepare_quadrature_and_basis(elemType, order)
     jac, det, coords_gp = get_jacobians(elemType, xi)
@@ -75,8 +73,6 @@ def main(geo_filename, mesh_size, order, L):
     )
     K = K_lil.tocsr()
 
-    
-
     dirichlet_dofs = boundary_dofs_square(coords_nodes, L)
     dirichlet_values = np.array(
         [u_exact(coords_nodes[i]) for i in dirichlet_dofs],
@@ -85,12 +81,18 @@ def main(geo_filename, mesh_size, order, L):
 
     U = solve_dirichlet(K, F, dirichlet_dofs, dirichlet_values)
 
+    errL2, errH1s, errH1 = compute_L2_H1_errors(
+        elemType, elemTags, elements_idx, U,
+        xi, w, N, gN, jac, det, coords_gp,
+        u_exact, grad_exact
+    )
+
+    if do_plot:
+        plot_solution_2d(coords_nodes, elements_idx, U)
+
     gmsh_finalize()
 
-    plot_solution_2d(coords_nodes, elements_idx, U)
-
-    err = np.max(np.abs(U - np.array([u_exact(x) for x in coords_nodes])))
-    print("max error =", err)
+    return errL2, errH1s, errH1, coords_nodes.shape[0]
 
 
 if __name__ == "__main__":
@@ -102,9 +104,36 @@ if __name__ == "__main__":
     order = args.order
     L = args.L
 
-    main(
-        "square.geo",
-        mesh_size=0.05,
-        order=1,
-        L=1.0
-    )
+    mesh_sizes = [0.2, 0.1, 0.05]
+
+    errsL2 = []
+    errsH1s = []
+    errsH1 = []
+    nnodes = []
+
+    for h in mesh_sizes:
+        print(f"\n------- mesh_size = {h} ----------")
+        errL2, errH1s, errH1, nn = main(
+            "square.geo",
+            mesh_size=h,
+            order=1,
+            L=1.0,
+            do_plot=True
+        )
+        errsL2.append(errL2)
+        errsH1s.append(errH1s)
+        errsH1.append(errH1)
+        nnodes.append(nn)
+
+    ratesL2 = convergence_rates(mesh_sizes, errsL2)
+    ratesH1s = convergence_rates(mesh_sizes, errsH1s)
+    ratesH1 = convergence_rates(mesh_sizes, errsH1)
+
+    print_table = False
+    if (print_table):
+        print("\nConvergence table:")
+        print(f"{'h':>10} {'nnodes':>10} {'errL2':>15} {'rateL2':>10} {'errH1s':>15} {'rateH1s':>10} {'errH1':>15} {'rateH1':>10}")
+        for h, nn, eL2, rL2, eH1s, rH1s, eH1, rH1 in zip(
+            mesh_sizes, nnodes, errsL2, ratesL2, errsH1s, ratesH1s, errsH1, ratesH1
+        ):
+            print(f"{h:10.4f} {nn:10d} {eL2:15.6e} {rL2:10.4f} {eH1s:15.6e} {rH1s:10.4f} {eH1:15.6e} {rH1:10.4f}")
