@@ -1,6 +1,7 @@
 # plot_utils.py
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 import gmsh
 
 
@@ -57,3 +58,25 @@ def setup_interactive_figure(xlim=(0.0, 1.0), ylim=None):
         ax.set_ylim(*ylim)
     ax.grid(True)
     return fig, ax
+
+def plot_solution_2d(coords_nodes, elements_idx, U, show_mesh=True):
+    x = coords_nodes[:, 0]
+    y = coords_nodes[:, 1]
+
+    # Keep only the 3 corner nodes of each triangle
+    triangles = np.asarray(elements_idx[:, :3], dtype=int)
+
+    tri = mtri.Triangulation(x, y, triangles)
+
+    plt.figure()
+    plt.tricontourf(tri, U, levels=30)
+    plt.colorbar(label="u_h")
+
+    if show_mesh:
+        plt.triplot(tri, color="k", linewidth=0.4, alpha=0.5)
+
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title("Finite element solution")
+    plt.axis("equal")
+    plt.show()

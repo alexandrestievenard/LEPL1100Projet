@@ -53,8 +53,6 @@ def get_jacobians(elemType, xi):
     jacobians, dets, coords = gmsh.model.mesh.getJacobians(elemType, xi)
     return jacobians, dets, coords
 
-def get_number_of_elements(elemType, )
-
 def build_2d_mesh(geo_filename, mesh_size, order=1):
     """
     Load a .geo file and generate a 2D mesh with uniform element size.
@@ -106,7 +104,7 @@ def build_2d_mesh(geo_filename, mesh_size, order=1):
 
     return elemType, nodeTags, nodeCoords, elemTags, elemNodeTags
 
-def format_2d_mesh(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags):
+def format_2d_mesh(nodeTags, nodeCoords, elemTags, elemNodeTags):
     """
     Helper function to convert raw arrays from build_2d_mesh in easier format:
     - coords: [(x1,y1,z1), (x2,y2,z3), ...]

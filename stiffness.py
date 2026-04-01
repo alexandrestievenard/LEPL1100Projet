@@ -6,8 +6,10 @@ from scipy.sparse import lil_matrix
 import numpy as np
 from scipy.sparse import lil_matrix
 
+from gmsh_utils import format_2d_mesh
 
-def assemble_stiffness_and_rhs(nn, elemTags, conn, jac, det, xphys, w, N, gN, kappa_fun, rhs_fun):
+
+def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, kappa_fun, rhs_fun):
     """
     Objects:
     --------
@@ -45,13 +47,13 @@ def assemble_stiffness_and_rhs(nn, elemTags, conn, jac, det, xphys, w, N, gN, ka
     """
     ne = len(elemTags)
     ngp = len(w)
-
     conn = np.asarray(conn, dtype=np.int64)
     if conn.ndim == 1:
         nloc = len(conn) // ne
         conn = conn.reshape(ne, nloc)
     else:
         nloc = conn.shape[1]
+    nn = int(np.max(conn)) + 1
 
     det = np.asarray(det, dtype=np.float64).reshape(ne, ngp)
     xphys = np.asarray(xphys, dtype=np.float64).reshape(ne, ngp, 3)
@@ -77,10 +79,10 @@ def assemble_stiffness_and_rhs(nn, elemTags, conn, jac, det, xphys, w, N, gN, ka
                 Ia = int(nodes[a])
                 F[Ia] += wg * f_g * N[g, a] * detg
 
-                gradNa = invjacg.T @ gN[g, a]
+                gradNa = invjacg @ gN[g, a]
                 for b in range(nloc):
                     Ib = int(nodes[b])
-                    gradNb = invjacg.T @ gN[g, b]
+                    gradNb = invjacg @ gN[g, b]
                     K[Ia, Ib] += wg * kappa_g * np.dot(gradNa, gradNb) * detg
 
     return K, F
