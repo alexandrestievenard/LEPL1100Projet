@@ -1,7 +1,7 @@
 # plot_utils.py
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.tri as mtri
+import matplotlib.tri as tri
 import gmsh
 
 
@@ -50,33 +50,91 @@ def plot_fe_solution_high_order(
     return ax
 
 
-def setup_interactive_figure(xlim=(0.0, 1.0), ylim=None):
+def setup_interactive_figure(xlim=None, ylim=None):
     plt.ion()
     fig, ax = plt.subplots()
-    ax.set_xlim(*xlim)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
     if ylim is not None:
         ax.set_ylim(*ylim)
-    ax.grid(True)
     return fig, ax
 
-def plot_solution_2d(coords_nodes, elements_idx, U, show_mesh=True):
-    x = coords_nodes[:, 0]
-    y = coords_nodes[:, 1]
+def plot_mesh_2d(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags, tag_to_index=None):
 
-    # Keep only the 3 corner nodes of each triangle
-    triangles = np.asarray(elements_idx[:, :3], dtype=int)
+    coords = nodeCoords.reshape(-1, 3)
+    x = coords[:, 0]
+    y = coords[:, 1]
 
-    tri = mtri.Triangulation(x, y, triangles)
+    if tag_to_index is None:
+        max_node_tag = int(np.max(nodeTags))
+        tag_to_index = np.zeros(max_node_tag + 1, dtype=int)
+        for i, tag in enumerate(nodeTags):
+            tag_to_index[int(tag)] = i
 
-    plt.figure()
-    plt.tricontourf(tri, U, levels=30)
-    plt.colorbar(label="u_h")
+    num_elements = len(elemTags)
+    nodes_per_elem = len(elemNodeTags) // num_elements
 
-    if show_mesh:
-        plt.triplot(tri, color="k", linewidth=0.4, alpha=0.5)
+    # take only the first 3 nodes (=geometric nodes that form the triangles)    
+    all_nodes = elemNodeTags.reshape(num_elements, nodes_per_elem)
+    corner_nodes = all_nodes[:, :3] 
+    
+    # Map to indices
+    tri_indices = tag_to_index[corner_nodes.astype(int)]
+    # ---------------------------------------
 
-    plt.xlabel("x")
-    plt.ylabel("y")
-    plt.title("Finite element solution")
-    plt.axis("equal")
+    mesh_triang = tri.Triangulation(x, y, tri_indices)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Plot the skeleton
+    ax.triplot(mesh_triang, color='black', lw=0.5, alpha=0.4)
+
+    colors = ["red", "darkblue", "orange", "mediumpurple", "pink"]
+    for i, (name, dim) in enumerate(bnds):
+        tags = bnds_tags[i]
+        indices = tag_to_index[tags.astype(int)]
+        ax.scatter(x[indices], y[indices], label=name, s=15, zorder=3, 
+                   marker="o", facecolor="None", edgecolor=colors[i % len(colors)])
+
+    ax.set_aspect('equal')
+    ax.legend(frameon=True, framealpha=1, ncols=2, loc="lower center", bbox_to_anchor=(0.5, 1.02))
+    plt.axis(False)
     plt.show()
+
+
+def plot_fe_solution_2d(elemNodeTags, nodeCoords, nodeTags, U, tag_to_dof, show_mesh=False, ax=None, label=None):
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # 1. Map coordinates to our compact DoF indices
+    num_dofs = len(U)
+    coords_mapped = np.zeros((num_dofs, 2))
+    all_coords = nodeCoords.reshape(-1, 3)
+    
+    for i, tag in enumerate(nodeTags):
+        dof_idx = tag_to_dof[int(tag)]
+        if dof_idx != -1:
+            coords_mapped[dof_idx] = all_coords[i, :2]
+
+    x = coords_mapped[:, 0]
+    y = coords_mapped[:, 1]
+
+    # 2. Determine nodes per element dynamically
+    total_nodes_in_elems = len(elemNodeTags)
+    # Standard Lagrange triangle node counts: Order 1=3, Order 2=6, Order 3=10, Order 4=15
+    for possible_n in [3, 6, 10, 15, 21]:
+        if total_nodes_in_elems % possible_n == 0:
+            nodes_per_elem = possible_n
+            break
+    # 3. Reshape and extract ONLY the 3 corner nodes for Matplotlib
+    conn_reshaped = elemNodeTags.reshape(-1, nodes_per_elem)
+    # Map the GMSH tags to our 0...N-1 indices
+    triangles = tag_to_dof[conn_reshaped[:, :3].astype(int)]
+    # 4. Plotting
+    U = np.array(U).flatten()
+    contour = ax.tricontourf(x, y, triangles, U, levels=100, cmap='seismic', vmin=-2.0, vmax=2.0)
+    
+    if show_mesh:
+        ax.triplot(x, y, triangles, color='white', linewidth=0.2, alpha=0.3)
+
+    return contour

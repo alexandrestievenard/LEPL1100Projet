@@ -45,24 +45,62 @@ def prepare_quadrature_and_basis(elemType, order):
     return xi, np.asarray(w, dtype=float), N, gN
 
 
-def get_jacobians(elemType, xi):
+def get_jacobians(elemType, xi, tag=-1):
     """
     Wrapper around gmsh.getJacobians.
     Returns (jacobians, dets, coords)
     """
-    jacobians, dets, coords = gmsh.model.mesh.getJacobians(elemType, xi)
+    jacobians, dets, coords = gmsh.model.mesh.getJacobians(elemType, xi, tag=tag)
     return jacobians, dets, coords
 
-def build_2d_mesh(geo_filename, mesh_size, order=1):
+
+def end_dofs_from_nodes(nodeCoords):
     """
-    Load a .geo file and generate a 2D mesh with uniform element size.
+    Robustly identify first/last node dofs from coordinates (x-min, x-max).
+    nodeCoords is flattened [x0,y0,z0, x1,y1,z1, ...]
+    Returns (left_dof, right_dof) as 0-based indices.
+    """
+    X = np.asarray(nodeCoords, dtype=float).reshape(-1, 3)[:, 0]
+    left = int(np.argmin(X))
+    right = int(np.argmax(X))
+    return left, right
+
+def border_dofs_from_tags(l_tags, tag_to_dof):
+    """
+    Converts a list of GMSH node tags into the corresponding 
+    compact matrix indices (DoFs).
+    """
+    # Ensure tags are integers
+    l_tags = np.asarray(l_tags, dtype=int)
+    
+    # Filter out any tags that might not be in our DoF mapping (like geometry points)
+    # then map them to our 0...N-1 indices
+    valid_mask = (tag_to_dof[l_tags] != -1)
+    l_dofs = tag_to_dof[l_tags[valid_mask]]
+    return l_dofs
+
+def getPhysical(name):
+    """
+    Get the physical group elements and nodes for a given name and dimension.
+    """
+    
+    dimTags = gmsh.model.getEntitiesForPhysicalName(name)
+    elemTypes, elemTags, elemNodeTags = gmsh.model.mesh.getElements(dim=dimTags[0][0], tag=dimTags[0][1])
+    elemType = elemTypes[0]  # Assuming one element type per physical group
+    elemTags = elemTags[0]
+    elemNodeTags = elemNodeTags[0]
+    entityTag = dimTags[0][1]
+    return elemType, elemTags, elemNodeTags, entityTag
+    
+
+def open_2d_mesh(msh_filename, order=1):
+    """
+    Load a .msh file.
 
     Parameters
     ----------
-    geo_filename : str
-        Path to the .geo file
-    mesh_size : float
-        Target mesh size (uniform)
+    msh_filename : str
+        Path to the .msh file
     order : int
         Polynomial order of elements
 
@@ -74,21 +112,7 @@ def build_2d_mesh(geo_filename, mesh_size, order=1):
     import gmsh
 
     # --- load geometry
-    gmsh.open(geo_filename)
-
-    # --- FORCE uniform mesh size everywhere
-    gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size)
-    gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size)
-
-    # prevent boundary propagation (VERY important)
-    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-
-    # disable curvature & point based sizing
-    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-
-    # --- generate 2D mesh
-    gmsh.model.mesh.generate(2)
+    gmsh.open(msh_filename)
 
     # --- high order
     gmsh.model.mesh.setOrder(order)
@@ -102,33 +126,27 @@ def build_2d_mesh(geo_filename, mesh_size, order=1):
     # --- elements
     elemTags, elemNodeTags = gmsh.model.mesh.getElementsByType(elemType)
 
-    return elemType, nodeTags, nodeCoords, elemTags, elemNodeTags
+    surf = gmsh.model.getEntities(2)[0][1]
 
-def format_2d_mesh(nodeTags, nodeCoords, elemTags, elemNodeTags):
-    """
-    Helper function to convert raw arrays from build_2d_mesh in easier format:
-    - coords: [(x1,y1,z1), (x2,y2,z3), ...]
-    - elements: [(e1tag1,e1tag2,e1tag3), (e2tag1,e2tag2,e2tag3), ...]
-    - elements_idx: [(e1idx1,e1idx2,e1idx3), ...]
+    curve_tags = gmsh.model.getBoundary([(2, surf)], oriented=False)
+    
+    gmsh.model.addPhysicalGroup(1, [curve_tags[0][1]], tag=1)
+    gmsh.model.setPhysicalName(1, 1, "OuterBoundary")
 
-    Example : to know coordinates of nodes of first triangle we can simply do:
-    coords[elements_idx[0]]
+    gmsh.model.addPhysicalGroup(1, [curve_tags[1][1]], tag=2)
+    gmsh.model.setPhysicalName(1, 2, "InnerBoundary")
 
-    with x1 = coords[elements_idx[0][0]]
-    with x2 = coords[elements_idx[0][1]]
-    with x3 = coords[elements_idx[0][2]]
-    """
-    # Reshape arrays to convenient format
-    coords = nodeCoords.reshape(-1, 3)
+    bnds = [('OuterBoundary', 1),('InnerBoundary', 1)]
 
-    n_elem = len(elemTags)
-    nloc = len(elemNodeTags) // n_elem
-    elements = elemNodeTags.reshape(n_elem, nloc)
+    bnds_tags = []
+    for name, dim in bnds:
+        tag = -1
+        for t in gmsh.model.getPhysicalGroups(dim):
+            if gmsh.model.getPhysicalName(dim, t[1]) == name:
+                tag = t[1]
+                break
+        if tag == -1:
+            raise ValueError(f"Physical group '{name}' not found in mesh.")
+        bnds_tags.append(gmsh.model.mesh.getNodesForPhysicalGroup(dim, tag)[0])
 
-    tag_to_index = {tag: i for i, tag in enumerate(nodeTags)}
-    elements_idx = np.array([
-        [tag_to_index[tag] for tag in elem]
-        for elem in elements
-    ], dtype=int)
-
-    return coords, elements, elements_idx
+    return elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags

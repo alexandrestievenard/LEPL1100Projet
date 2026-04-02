@@ -3,7 +3,7 @@ import numpy as np
 from scipy.sparse import lil_matrix
 
 
-def assemble_mass(elemTags, conn, det, w, N):
+def assemble_mass(elemTags, conn, det, w, N, tag_to_dof):
     """
     Assemble global mass matrix:
         M_ij = sum_e ∫_e N_i N_j dx
@@ -23,7 +23,7 @@ def assemble_mass(elemTags, conn, det, w, N):
     ne = len(elemTags)
     ngp = len(w)
     nloc = int(len(conn) // ne)
-    nn = int(np.max(conn))  # gmsh node tags are 1..nn (assuming compact)
+    nn = int(np.max(tag_to_dof) + 1)
 
     det = np.asarray(det, dtype=np.float64).reshape(ne, ngp)
     conn = np.asarray(conn, dtype=np.int64).reshape(ne, nloc)
@@ -32,15 +32,16 @@ def assemble_mass(elemTags, conn, det, w, N):
     M = lil_matrix((nn, nn), dtype=np.float64)
 
     for e in range(ne):
-        nodes = conn[e, :] - 1  # to 0-based dof ids
+        element_tags = conn[e, :]
+        dof_indices = tag_to_dof[element_tags]
         for g in range(ngp):
             wg = w[g]
             detg = det[e, g]
             for a in range(nloc):
-                Ia = int(nodes[a])
+                Ia = int(dof_indices[a])
                 Na = N[g, a]
                 for b in range(nloc):
-                    Ib = int(nodes[b])
+                    Ib = int(dof_indices[b])
                     M[Ia, Ib] += wg * Na * N[g, b] * detg
 
     return M

@@ -1,6 +1,7 @@
 # dirichlet.py
 import numpy as np
 from scipy.sparse.linalg import spsolve
+from scipy.linalg import det
 
 
 def apply_dirichlet_by_reduction(K, F, dirichlet_dofs, dirichlet_values):

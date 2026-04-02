@@ -21,7 +21,7 @@ def _numeric_grad_3d(u_exact, x, eps=1e-7):
 def compute_L2_H1_errors(
     elemType,
     elemTags,
-    conn,
+    elemNodeTags,
     U,
     xi, w, N, gN,
     jac, det, coords,
@@ -38,9 +38,8 @@ def compute_L2_H1_errors(
         Gmsh element type (line/triangle/tetra, etc.)
     elemTags : array-like, (ne,)
         Element tags from gmsh.model.mesh.getElementsByType(elemType)[0]
-    conn : array-like, shape (ne, nloc)
-        Element connectivity converted to 0 based indexing with
-        format_2d_mesh from gmsh.model.mesh.getElementsByType(elemType)[1]
+    elemNodeTags : array-like, flattened length ne*nloc
+        Element connectivity from gmsh.model.mesh.getElementsByType(elemType)[1]
     U : ndarray, (nn,)
         FE solution vector aligned with gmsh compact node ordering (nodeTag-1 indexing).
     xi, w, N, gN :
@@ -79,7 +78,7 @@ def compute_L2_H1_errors(
     jac = np.asarray(jac, dtype=float).reshape(ne, ngp, 3, 3)
     coords = np.asarray(coords, dtype=float).reshape(ne, ngp, 3)
 
-    conn = np.asarray(conn, dtype=np.int64)
+    conn = np.asarray(elemNodeTags, dtype=np.int64).reshape(ne, nloc) - 1  # 0-based
     N = np.asarray(N, dtype=float).reshape(ngp, nloc)
     gN = np.asarray(gN, dtype=float).reshape(ngp, nloc, 3)
 
@@ -132,10 +131,3 @@ def compute_L2_H1_errors(
     err_H1 = float(np.sqrt(max(I_L2 + I_H1, 0.0)))
 
     return err_L2, err_H1_semi, err_H1
-
-def convergence_rates(hs, errs):
-    rates = [np.nan]
-    for i in range(1, len(errs)):
-        r = np.log(errs[i-1] / errs[i]) / np.log(hs[i-1] / hs[i])
-        rates.append(r)
-    return rates
