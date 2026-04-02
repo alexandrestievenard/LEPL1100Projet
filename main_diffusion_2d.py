@@ -30,7 +30,7 @@ def main():
     T = dt * nstep
 
     elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags = open_2d_mesh(
-        msh_filename="panpan.msh", order=args.order
+        msh_filename="rect_hole.msh", order=args.order
     )
 
     plot_mesh_2d(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags)
