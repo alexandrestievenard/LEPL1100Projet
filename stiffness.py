@@ -86,4 +86,6 @@ def assemble_rhs_neumann(F, elemTags, conn, jac, det, xphys, w, N, gN, g_neu_fun
                 N_a = N[g, a]
                 F[Ia] += wg * g_neu_g * N_a * detg
 
+
+     # Test Modif Louis
     return F
