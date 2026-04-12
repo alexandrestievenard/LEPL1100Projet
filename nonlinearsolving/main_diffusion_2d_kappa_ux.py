@@ -3,16 +3,24 @@
 # =============================================================================
 #
 # MODÈLE MATHÉMATIQUE :
-#   ∂u/∂t - ∇·(κ(x)∇u) = r·u·(1 - u/K(x))
+#   ∂u/∂t - ∇·(κ(u,x)∇u) = r·u·(1 - u/K(x))
 #
-# SCHÉMA NUMÉRIQUE : IMEX (IMplicit-EXplicit)
-#   - Diffusion : implicite → stabilité inconditionnelle (pas de contrainte sur Δt)
-#   - Réaction  : explicite → simple évaluation algébrique, stable si Δt·r < 1
+# SCHÉMA NUMÉRIQUE :
+#   - Discrétisation en espace : éléments finis 2D
+#   - Discrétisation en temps   : implicite
+#   - Non-linéarité             : résolue par Newton-Raphson à chaque pas de temps
+#
+# IDÉE :
+#   À chaque pas de temps, on cherche U^{n+1} tel que
+#       R(U^{n+1}) = 0
+#   où le résidu contient :
+#       - le terme temporel
+#       - le terme de diffusion non linéaire
+#       - le terme de réaction logistique
 #
 # USAGE :
-#   python main_diffusion_2d.py                          (paramètres par défaut)
-#   python main_diffusion_2d.py --dt 0.05 --nsteps 600  (plus fin en temps)
-#   python main_diffusion_2d.py --theta 0.5             (Crank-Nicolson)
+#   python main_diffusion_2d.py
+#   python main_diffusion_2d.py --dt 0.05 --nsteps 600
 #
 # PRÉREQUIS :
 #   Lancer d'abord python msh.py pour générer invasion_map.msh
@@ -30,7 +38,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
 import matplotlib.patheffects as pe
-from scipy.sparse.linalg import spsolve
 
 from gmsh_utils import (
     gmsh_init, gmsh_finalize, open_2d_mesh,
@@ -41,7 +48,7 @@ from stiffness_non_linear import assemble_stiffness_and_rhs
 from mass import assemble_mass
 from dirichlet import theta_step
 from plot_utils import plot_mesh_2d, plot_fe_solution_2d
-from newton_solver import assemble_residual, assemble_jacobian
+from newton_solver import newton_solver
 
 
 # =============================================================================
@@ -105,7 +112,7 @@ def kappa_base(x):
 
     return KAPPA_RURAL
 
-ALPHA_KAPPA = 0.02   # strength of density effect
+ALPHA_KAPPA = 0.3   # strength of density effect
 
 def kappa_fun(u, x):
     """
@@ -281,8 +288,8 @@ def main():
                         help="Ordre polynomial des éléments (1 ou 2)")
     parser.add_argument("--theta",  type=float, default=1.0,
                         help="Schéma θ : 1=Euler implicite, 0.5=Crank-Nicolson")
-    parser.add_argument("--dt",     type=float, default=0.1,
-                        help="Pas de temps [années]. Doit vérifier dt·r < 1 (ici dt<1)")
+    parser.add_argument("--dt",     type=float, default=0.5,
+                        help="Pas de temps [années]")
     parser.add_argument("--nsteps", type=int,   default=450,
                         help="Nombre de pas de temps. T_total = dt × nsteps")
     args = parser.parse_args()
@@ -371,69 +378,6 @@ def main():
     U = np.array([u0(dof_coords[i]) for i in range(num_dofs)], dtype=float)
     U[dir_dofs] = dir_vals   # appliquer Dirichlet dès t=0
 
-    # ── Test du Jacobien non linéaire ─────────────────────────────────────
-    J_test = assemble_jacobian(
-        U=U.copy(),
-        M=M,
-        dt=args.dt,
-        elemTags=elemTags,
-        conn=elemNodeTags,
-        jac=jac,
-        det=det,
-        xphys=coords,
-        w=w,
-        N=N,
-        gN=gN,
-        kappa_fun=kappa_fun,
-        dkappa_du=dkappa_du,
-        K_cap=K_cap,
-        r_growth=R_GROWTH,
-        tag_to_dof=tag_to_dof,
-        dirichlet_dofs=dir_dofs
-    )
-
-    print("\nTest assemble_jacobian")
-    print("shape(J) =", J_test.shape)
-    print("nnz(J)   =", J_test.nnz)
-
-    # vérifier que la diagonale Dirichlet vaut 1
-    if len(dir_dofs) > 0:
-        print("Dirichlet diagonal entries:",
-            [J_test[i, i] for i in dir_dofs[:min(5, len(dir_dofs))]])
-
-    R_test = assemble_residual(
-    U=U.copy(),
-    U_old=U.copy(),
-    M=M,
-    dt=args.dt,
-    elemTags=elemTags,
-    conn=elemNodeTags,
-    jac=jac,
-    det=det,
-    xphys=coords,
-    w=w,
-    N=N,
-    gN=gN,
-    kappa_fun=kappa_fun,
-    K_cap=K_cap,
-    r_growth=R_GROWTH,
-    tag_to_dof=tag_to_dof,
-    dirichlet_dofs=dir_dofs,
-    dirichlet_vals=dir_vals
-)
-
-    deltaU = spsolve(J_test, -R_test)
-
-    print("\nTest one Newton correction")
-    print("shape(deltaU) =", deltaU.shape)
-    print("||deltaU||    =", np.linalg.norm(deltaU))
-    print("min(deltaU)   =", np.min(deltaU))
-    print("max(deltaU)   =", np.max(deltaU))
-
-    if len(dir_dofs) > 0:
-        print("deltaU on Dirichlet dofs:",
-            deltaU[dir_dofs[:min(5, len(dir_dofs))]])
-
     # Vitesse théorique du front (pour campagne homogène)
     c_star = 2.0 * math.sqrt(KAPPA_RURAL * R_GROWTH)
 
@@ -455,48 +399,62 @@ def main():
     cb = None
 
     # ==========================================================================
-    # SECTION 6 — Boucle temporelle IMEX
+    # SECTION 6 — Boucle temporelle implicite
     #
     # À chaque pas de temps [tⁿ, tⁿ⁺¹] :
     #
-    #   1. RÉACTION (explicite) :
-    #      f_react[i] = r · U[i] · (1 - U[i] / K[i])   pour chaque nœud i
-    #      F_total = F0 + f_react · M_lump
-    #      (F0 ≈ 0 car pas de source volumique imposée)
+    #   1. On fige la solution précédente Uⁿ
     #
-    #   2. DIFFUSION (implicite via theta_step) :
-    #      (M + Δt·K) · Uⁿ⁺¹ = M·Uⁿ + Δt·F_total
-    #      avec Dirichlet sur le lac (u=0 maintenu à chaque pas)
+    #   2. On résout le problème non linéaire au temps tⁿ⁺¹ par Newton-Raphson :
+    #          R(Uⁿ⁺¹) = 0
     #
-    #   3. GARDE-FOU : U = max(U, 0) — la densité ne peut jamais être négative
+    #      avec
+    #          R(U) = (1/Δt) M (U - Uⁿ)
+    #                 + R_diff(U)
+    #                 - R_reaction(U)
+    #
+    #   3. À chaque itération de Newton, on assemble :
+    #          - le résidu R(Uᵏ)
+    #          - la jacobienne J(Uᵏ)
+    #      puis on résout :
+    #          J(Uᵏ) δU = -R(Uᵏ)
+    #      et on met à jour :
+    #          Uᵏ⁺¹ = Uᵏ + δU
+    #
+    #   4. On applique enfin un garde-fou numérique :
+    #          U = max(U, 0)
+    #      afin d'éviter de petites valeurs négatives dues aux erreurs numériques.
     # ==========================================================================
+    print(f"  Schéma      : implicite non linéaire")
+    print(f"  Résolution  : Newton-Raphson à chaque pas de temps")
+    print(f"  dt={args.dt} an | T={args.dt * args.nsteps:.0f} ans | DDLs={num_dofs}")
     for step in range(args.nsteps):
         t = step * args.dt
 
-        # Assemblage de la matrice de raideur
-        K_lil, F0 = assemble_stiffness_and_rhs(
-            elemTags, elemNodeTags, jac, det, coords, w, N, gN,
-            U,                 # current solution used to evaluate kappa(u,x)
-            kappa_fun,
-            lambda x: 0.0,
-            tag_to_dof
-        )
-        K_mat = K_lil.tocsr()
+        U_old = U.copy()
 
-        # ── Terme de réaction logistique Fisher-KPP (explicite) ───────────
-        U_pos   = np.maximum(U, 0.0)
-        f_react = R_GROWTH * U_pos * (1.0 - U_pos / K_nodal)
-        F_total = F0 + f_react * M_lump
-
-        # ── Pas de temps θ (diffusion implicite) ──────────────────────────
-        U = theta_step(
-            M, K_mat,
-            F_total, F_total,   # Fn = Fnp1 car F ne dépend pas du temps
-            U,
-            dt=args.dt, theta=args.theta,
-            dirichlet_dofs=dir_dofs,
-            dir_vals_np1=dir_vals
-        )
+        # ── Résolution par Newton Raphson ──────────────────────────
+        U = newton_solver(
+        U_init=U_old.copy(),      # initial guess = solution précédente
+        U_old=U_old,       # pour R1
+        M=M,
+        dt=args.dt,
+        elemTags=elemTags,
+        conn=elemNodeTags,
+        jac=jac,
+        det=det,
+        xphys=coords,
+        w=w,
+        N=N,
+        gN=gN,
+        kappa_fun=kappa_fun,
+        dkappa_du=dkappa_du,
+        K_cap=K_cap,
+        r_growth=R_GROWTH,
+        tag_to_dof=tag_to_dof,
+        dirichlet_dofs=dir_dofs,
+        dirichlet_vals=dir_vals
+    )
 
         # Garde-fou numérique : u ≥ 0 en tout point
         U = np.maximum(U, 0.0)

@@ -2,6 +2,7 @@ from stiffness_non_linear import assemble_stiffness_and_rhs
 from scipy.sparse import lil_matrix
 
 import numpy as np
+from scipy.sparse.linalg import spsolve
 
 def assemble_residual(U, U_old, M, dt, elemTags, conn, jac, det, 
                       xphys, w, N, gN, kappa_fun, K_cap, 
@@ -140,7 +141,7 @@ def assemble_jacobian(U, M, dt, elemTags, conn, jac, det,
             J.rows[i] = [i]
             J.data[i] = [1.0]
 
-        # optionnel mais propre : annuler aussi les colonnes Dirichlet
+        # annuler aussi les colonnes Dirichlet
         dir_set = set(int(i) for i in dirichlet_dofs)
         for row in range(J.shape[0]):
             if row in dir_set:
@@ -155,3 +156,54 @@ def assemble_jacobian(U, M, dt, elemTags, conn, jac, det,
             J.data[row] = new_vals
 
     return J.tocsr()
+
+def newton_solver(
+    U_init,
+    U_old,
+    M, dt,
+    elemTags, conn, jac, det, xphys, w, N, gN,
+    kappa_fun, dkappa_du, K_cap, r_growth,
+    tag_to_dof,
+    dirichlet_dofs=None, dirichlet_vals=None,
+    tol=1e-8, max_iter=20):
+
+    U = U_init.copy()
+
+    for k in range(max_iter):
+        
+        # 1) Calcul du résidu
+        R = assemble_residual(
+            U, U_old, M, dt,
+            elemTags, conn, jac, det, xphys, w, N, gN,
+            kappa_fun, K_cap, r_growth,
+            tag_to_dof,
+            dirichlet_dofs, dirichlet_vals
+        )
+
+        norm_R = np.linalg.norm(R)
+
+        # critère d'arrêt
+        if norm_R < tol:
+            break
+
+        # 2) Jacobienne
+        J = assemble_jacobian(
+            U, M, dt,
+            elemTags, conn, jac, det, xphys, w, N, gN,
+            kappa_fun, dkappa_du, K_cap, r_growth,
+            tag_to_dof,
+            dirichlet_dofs
+        )
+
+        # 3) Résolution du système linéaire
+        deltaU = spsolve(J, -R)
+
+        # 4) Mise à jour
+        U += deltaU
+
+        # sécurité (optionnel mais utile)
+        if np.linalg.norm(deltaU) < tol:
+            break
+
+    return U
+    
