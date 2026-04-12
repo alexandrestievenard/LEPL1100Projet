@@ -40,6 +40,7 @@ from stiffness_non_linear import assemble_stiffness_and_rhs
 from mass import assemble_mass
 from dirichlet import theta_step
 from plot_utils import plot_mesh_2d, plot_fe_solution_2d
+from newton_solver import assemble_residual
 
 
 # =============================================================================
@@ -369,6 +370,35 @@ def main():
     U = np.array([u0(dof_coords[i]) for i in range(num_dofs)], dtype=float)
     U[dir_dofs] = dir_vals   # appliquer Dirichlet dès t=0
 
+    # ── Test assemble_residual ─────────────────────────────────────────────
+    R_test, R1_test, R2_test, R3_test = assemble_residual(
+        U=U.copy(),
+        U_old=U.copy(),
+        M=M,
+        dt=args.dt,
+        elemTags=elemTags,
+        conn=elemNodeTags,
+        jac=jac,
+        det=det,
+        xphys=coords,
+        w=w,
+        N=N,
+        gN=gN,
+        kappa_fun=kappa_fun,
+        K_cap=K_cap,
+        r_growth=R_GROWTH,
+        tag_to_dof=tag_to_dof,
+        dirichlet_dofs=dir_dofs,
+        dirichlet_vals=dir_vals
+    )
+
+    print("||R1|| =", np.linalg.norm(R1_test))
+    print("||R2|| =", np.linalg.norm(R2_test))
+    print("||R3|| =", np.linalg.norm(R3_test))
+    print("||R||  =", np.linalg.norm(R_test))
+    print("min/max R2 =", np.min(R2_test), np.max(R2_test))
+    print("min/max R3 =", np.min(R3_test), np.max(R3_test))
+
     # Vitesse théorique du front (pour campagne homogène)
     c_star = 2.0 * math.sqrt(KAPPA_RURAL * R_GROWTH)
 
@@ -481,6 +511,8 @@ def main():
         fig.tight_layout(rect=[0, 0.12, 1, 1])
         fig.canvas.draw()
         plt.pause(0.02)
+
+        
 
         # ── Suivi console (toutes les 30 étapes) ──────────────────────────
         if step % 30 == 0:
