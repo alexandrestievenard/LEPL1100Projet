@@ -48,7 +48,7 @@ from stiffness_non_linear import assemble_stiffness_and_rhs
 from mass import assemble_mass
 from dirichlet import theta_step
 from plot_utils import plot_mesh_2d, plot_fe_solution_2d
-from newton_solver import newton_solver
+from newton_solver import newton_solver, preprocess_newton_data
 
 
 # =============================================================================
@@ -112,7 +112,7 @@ def kappa_base(x):
 
     return KAPPA_RURAL
 
-ALPHA_KAPPA = 0.3   # strength of density effect
+ALPHA_KAPPA = 100   # strength of density effect
 
 def kappa_fun(u, x):
     """
@@ -321,6 +321,17 @@ def main():
     xi, w, N, gN     = prepare_quadrature_and_basis(elemType, args.order)
     jac, det, coords = get_jacobians(elemType, xi)
 
+    newton_data = preprocess_newton_data(
+    elemTags=elemTags,
+    conn=elemNodeTags,
+    jac=jac,
+    det=det,
+    xphys=coords,
+    w=w,
+    N=N,
+    gN=gN,
+    tag_to_dof=tag_to_dof)
+
     # ── 5.4 Identification des DDLs de chaque frontière ───────────────────
     bnd_names = [name for name, _ in bnds]
 
@@ -393,7 +404,7 @@ def main():
 
     # ── 5.10 Figure interactive (fond sombre cohérent avec colormap plasma) ─
     plt.ion()
-    fig, ax = plt.subplots(figsize=(9, 10))
+    fig, ax = plt.subplots(figsize=(7, 7))
     fig.patch.set_facecolor('#0d0d1a')
     ax.set_facecolor('#0d0d1a')
     cb = None
@@ -428,6 +439,7 @@ def main():
     print(f"  Schéma      : implicite non linéaire")
     print(f"  Résolution  : Newton-Raphson à chaque pas de temps")
     print(f"  dt={args.dt} an | T={args.dt * args.nsteps:.0f} ans | DDLs={num_dofs}")
+
     for step in range(args.nsteps):
         t = step * args.dt
 
@@ -435,26 +447,17 @@ def main():
 
         # ── Résolution par Newton Raphson ──────────────────────────
         U = newton_solver(
-        U_init=U_old.copy(),      # initial guess = solution précédente
-        U_old=U_old,       # pour R1
+        U_init=U_old.copy(),
+        U_old=U_old,
         M=M,
         dt=args.dt,
-        elemTags=elemTags,
-        conn=elemNodeTags,
-        jac=jac,
-        det=det,
-        xphys=coords,
-        w=w,
-        N=N,
-        gN=gN,
+        newton_data=newton_data,
         kappa_fun=kappa_fun,
         dkappa_du=dkappa_du,
         K_cap=K_cap,
         r_growth=R_GROWTH,
-        tag_to_dof=tag_to_dof,
         dirichlet_dofs=dir_dofs,
-        dirichlet_vals=dir_vals
-    )
+        dirichlet_vals=dir_vals)
 
         # Garde-fou numérique : u ≥ 0 en tout point
         U = np.maximum(U, 0.0)
