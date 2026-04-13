@@ -15,7 +15,7 @@
 #   vers le jaune vif pour u=vmax. Cela rend le front d'invasion immédiatement
 #   visible même pour de très faibles densités.
 # =============================================================================
-
+ 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
