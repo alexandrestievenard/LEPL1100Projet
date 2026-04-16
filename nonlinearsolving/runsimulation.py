@@ -689,9 +689,9 @@ def main():
                         help="Ordre polynomial des éléments")
     parser.add_argument("--theta", type=float, default=1.0,
                         help="Paramètre theta du schéma")
-    parser.add_argument("--dt", type=float, default=0.1,
+    parser.add_argument("--dt", type=float, default=0.05,
                         help="Pas de temps [années]")
-    parser.add_argument("--nsteps", type=int, default=600,
+    parser.add_argument("--nsteps", type=int, default=1200,
                         help="Nombre de pas de temps")
     parser.add_argument("--method", type=str, default="imex",
                         choices=["imex", "newton"],
@@ -742,7 +742,7 @@ def main():
 
     # ── 5.5 Visualisation a posteriori ─────────────────────────────────────
     if not args.no_visu:
-        save_results_animation(problem, results, output_file="imex.gif", stride=1, fps=10)
+        save_results_animation(problem, results, output_file="imex(2xplusdesteps).gif", stride=2, fps=10)
 
     gmsh_finalize()
     return problem, results
