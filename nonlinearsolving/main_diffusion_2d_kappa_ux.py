@@ -57,13 +57,17 @@ from animation import save_simulation_animation
 # (doivent être cohérentes avec les positions définies dans msh.py)
 # =============================================================================
 
-CITY_CX,   CITY_CY   = 65.0, 30.0   # centre de la Métropole Centrale [km]
-CITY_R_HARD          =  8.0          # rayon du cœur urbain dense [km]
-CITY_R_SOFT          = 15.0          # rayon de la zone péri-urbaine (banlieues) [km]
+CITY_CX, CITY_CY = 23.0, 58.0
+CITY_R_HARD = 5.0
+CITY_R_SOFT = 12.0
 
-LAKE_CX,   LAKE_CY   = 22.0, 68.0   # centre du Lac de la Garenne [km]
-MTN_CX,    MTN_CY    = 76.0, 70.0   # centroïde du Massif des Crêtes [km]
-BOCAGE_CX, BOCAGE_CY = 30.0, 75.0   # centre du hotspot bocager [km]
+MTN1_CX, MTN1_CY = 35.0, 106.0
+MTN2_CX, MTN2_CY = 47.0, 72.0
+MTN3_CX, MTN3_CY = 54.0, 53.0
+
+BOCAGE_CX, BOCAGE_CY = 68.0, 115.0
+
+X0, Y0 = 52.0, 25.0   # foyer initial
 
 
 # =============================================================================
@@ -113,7 +117,7 @@ def kappa_base(x):
 
     return KAPPA_RURAL
 
-ALPHA_KAPPA = 100   # strength of density effect
+ALPHA_KAPPA = 0.02   # strength of density effect
 
 def kappa_fun(u, x):
     """
@@ -186,29 +190,19 @@ LORANGE = '#FFAB40'   # label montagne
 
 
 def add_overlays(ax, t_year):
-    """
-    Superpose les annotations géographiques sur la carte de densité :
-      - Deux cercles cyan pour la métropole (cœur + zone péri-urbaine)
-      - Labels de chaque obstacle avec halo noir pour lisibilité sur fond sombre
-      - Croix blanche au foyer d'invasion initial (visible seulement aux premiers pas)
-    """
     theta_arc = np.linspace(0, 2 * math.pi, 300)
+    halo = [pe.withStroke(linewidth=2, foreground='black')]
 
-    # ── Cercle cœur urbain (trait plein) ──────────────────────────────────
     ax.plot(
         CITY_CX + CITY_R_HARD * np.cos(theta_arc),
         CITY_CY + CITY_R_HARD * np.sin(theta_arc),
         color=CYAN, lw=1.5, ls='-', zorder=10, alpha=0.9
     )
-    # ── Cercle zone péri-urbaine (pointillé) ──────────────────────────────
     ax.plot(
         CITY_CX + CITY_R_SOFT * np.cos(theta_arc),
         CITY_CY + CITY_R_SOFT * np.sin(theta_arc),
         color=CYAN, lw=0.8, ls='--', zorder=10, alpha=0.6
     )
-
-    # Style commun pour les labels (halo noir = lisible sur toute couleur)
-    halo = [pe.withStroke(linewidth=2, foreground='black')]
 
     ax.text(CITY_CX, CITY_CY,
             'Métropole\n(K=1.5)', color=CYAN,
@@ -219,33 +213,33 @@ def add_overlays(ax, t_year):
             'banlieues (K→50)', color=CYAN,
             fontsize=6, ha='center', zorder=11, path_effects=halo)
 
-    ax.text(LAKE_CX, LAKE_CY,
-            'Lac\n(u≡0)', color=LBLUE,
-            fontsize=7.5, ha='center', va='center',
-            fontweight='bold', zorder=11, path_effects=halo)
-
-    ax.text(MTN_CX, MTN_CY,
-            'Massif\n(flux=0)', color=LORANGE,
-            fontsize=7.5, ha='center', va='center',
-            fontweight='bold', zorder=11, path_effects=halo)
-
     ax.text(BOCAGE_CX, BOCAGE_CY,
             'Bocage\n(K=80)', color=GOLD,
             fontsize=6.5, ha='center', va='center',
             zorder=11, alpha=0.85, path_effects=halo)
 
-    # Croix au foyer d'invasion (coin SW)
-    ax.plot(8, 8, 'x', color='white', ms=6, mew=1.5, zorder=12)
-    if t_year < 3:
-        ax.text(8, 12, 'Foyer\ninitial', color='white',
+    ax.text(MTN1_CX, MTN1_CY,
+            'Massif\n(flux=0)', color=LORANGE,
+            fontsize=7.0, ha='center', va='center',
+            fontweight='bold', zorder=11, path_effects=halo)
+
+    ax.text(MTN2_CX, MTN2_CY,
+            'Massif\n(flux=0)', color=LORANGE,
+            fontsize=7.0, ha='center', va='center',
+            fontweight='bold', zorder=11, path_effects=halo)
+
+    ax.text(MTN3_CX, MTN3_CY,
+            'Massif\n(flux=0)', color=LORANGE,
+            fontsize=7.0, ha='center', va='center',
+            fontweight='bold', zorder=11, path_effects=halo)
+
+    ax.plot(X0, Y0, 'x', color='white', ms=6, mew=1.5, zorder=12)
+    if t_year < 15:
+        ax.text(X0 + 5, Y0 + 5, 'Foyer\ninitial', color='white',
                 fontsize=6, ha='center', zorder=11, path_effects=halo)
 
 
 def make_legend(fig, ax, c_star):
-    """
-    Légende personnalisée expliquant le code couleur plasma.
-    Placée sous la figure (bbox_to_anchor en dehors des axes).
-    """
     patches = [
         mpatches.Patch(
             facecolor=mcolors.to_rgba('black'), edgecolor='white', lw=0.5,
@@ -257,8 +251,10 @@ def make_legend(fig, ax, c_star):
                        label='Population établie'),
         mpatches.Patch(facecolor='#ffff5e', edgecolor='none',
                        label=f'Saturation K (campagne={K_RURAL:.0f} ind/km²)'),
+        mpatches.Patch(facecolor=mcolors.to_rgba('black'), edgecolor='white', lw=0.5,
+                       label='Mer : u = 0'),
         mpatches.Patch(facecolor='white', edgecolor='gray', lw=0.5,
-                       label='Lac / Montagne (obstacle)'),
+                       label='Massifs : flux = 0'),
         mpatches.Patch(facecolor=mcolors.to_rgba('black'), edgecolor=CYAN, lw=1.5,
                        label=f'Métropole (K={K_URBAN})'),
     ]
@@ -291,7 +287,7 @@ def main():
                         help="Schéma θ : 1=Euler implicite, 0.5=Crank-Nicolson")
     parser.add_argument("--dt",     type=float, default=0.5,
                         help="Pas de temps [années]")
-    parser.add_argument("--nsteps", type=int,   default=50,
+    parser.add_argument("--nsteps", type=int,   default=30,
                         help="Nombre de pas de temps. T_total = dt × nsteps")
     args = parser.parse_args()
 
@@ -362,7 +358,6 @@ def main():
     # Gaussienne 2D centrée en (8,8) km, légèrement à l'intérieur du domaine
     # pour ne pas être au contact du bord (qui a Neumann=0 mais est irrégulier).
     # La fonction min(·, K(x)) garantit u0 ≤ K partout dès t=0.
-    X0, Y0 = 8.0, 8.0   # position du foyer [km]
     R0     = 5.0          # rayon caractéristique [km]
     A0     = 5.0          # amplitude maximale [ind/km²]
 
@@ -550,7 +545,7 @@ def main():
     c_star=c_star,
     add_overlays=add_overlays,
     make_legend=make_legend,
-    output_file="invasion_frelon.gif",
+    output_file="invasion_frelo n.gif",
     fps=10)
 
     print("\nSimulation terminée.")

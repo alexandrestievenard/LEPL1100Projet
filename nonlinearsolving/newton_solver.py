@@ -3,7 +3,7 @@ from scipy.sparse.linalg import spsolve
 import numpy as np
 
 
-def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof):
+def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof, K_nodal=None):
     """
     Pré-calcul des données éléments finis utilisées dans Newton.
 
@@ -18,6 +18,7 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
     - les indices globaux de DDL pour chaque élément
     - les inverses des jacobiens aux points de Gauss
     - les gradients physiques des fonctions de forme
+    - la restriction élémentaire éventuelle du champ K nodal
 
     Paramètres
     ----------
@@ -41,6 +42,10 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
         Gradients des fonctions de forme dans l'élément de référence.
     tag_to_dof : ndarray
         Tableau de conversion "tag Gmsh -> indice compact de DDL".
+    K_nodal : ndarray, optionnel
+        Champ nodal de capacité de charge.
+        Si fourni, il est restreint élément par élément et stocké
+        sous la forme K_elem[e, a].
 
     Retour
     ------
@@ -48,7 +53,7 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
         Dictionnaire contenant toutes les données pré-calculées
         utiles pour l'assemblage du résidu et de la jacobienne.
     """
-
+        
     # ============================================================
     # 1) Dimensions globales du problème
     # ============================================================
@@ -83,6 +88,13 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
     # 4) Conversion tags Gmsh -> indices compacts de DDL
     # ============================================================
     dof_indices = tag_to_dof[conn]   # shape = (ne, nloc)
+    K_elem = None
+
+    # ============================================================
+    # 4b) On s'occupe du champ de capacité nodal
+    # ============================================================
+    if K_nodal is not None:
+        K_elem = K_nodal[dof_indices]   # shape = (ne, nloc)
 
     # ============================================================
     # 5) Inversion des jacobiens une seule fois
@@ -133,12 +145,13 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
         "N": N,
         "gN": gN,
         "gradN_phys": gradN_phys,
+        "K_elem": K_elem,
     }
 
 
 def assemble_residual(U, U_old, M, dt,
                       newton_data,
-                      kappa_fun, K_cap,
+                      kappa_fun,
                       r_growth,
                       dirichlet_dofs=None, dirichlet_vals=None):
     """
@@ -155,6 +168,11 @@ def assemble_residual(U, U_old, M, dt,
     - R_diff(U) vient du terme de diffusion non linéaire,
     - R_reac(U) vient du terme de réaction logistique.
 
+    La capacité de charge K n'est plus fournie par une fonction K_cap(x),
+    mais par un champ nodal pré-calculé, stocké dans newton_data sous la
+    forme K_elem. Sa valeur au point de Gauss est reconstruite par
+    interpolation éléments finis.
+
     Paramètres
     ----------
     U : ndarray
@@ -167,10 +185,10 @@ def assemble_residual(U, U_old, M, dt,
         Pas de temps.
     newton_data : dict
         Données FEM pré-calculées par preprocess_newton_data().
+        Doit contenir notamment les connectivités, les gradients physiques
+        et, si la réaction en dépend, le champ élémentaire K_elem.
     kappa_fun : callable
         Fonction diffusivité non linéaire kappa(u, x).
-    K_cap : callable
-        Capacité de charge locale K(x).
     r_growth : float
         Taux de croissance logistique.
     dirichlet_dofs : array-like, optionnel
@@ -198,6 +216,9 @@ def assemble_residual(U, U_old, M, dt,
     w = newton_data["w"]
     N = newton_data["N"]
     gradN_phys = newton_data["gradN_phys"]
+    K_elem = newton_data["K_elem"]
+    if K_elem is None:
+        raise ValueError("newton_data['K_elem'] est None : fournir K_nodal à preprocess_newton_data.")
 
     # ============================================================
     # 2) Initialisation des contributions du résidu
@@ -238,7 +259,9 @@ def assemble_residual(U, U_old, M, dt,
             # Évaluation des coefficients non linéaires au point g
             # ----------------------------------------------------
             kappa_g = float(kappa_fun(u_g, xg))
-            K_g = float(K_cap(xg))
+            K_g = 0.0
+            for b in range(nloc):
+                K_g += K_elem[e, b] * N[g, b]
 
             # ----------------------------------------------------
             # Ajout des contributions au résidu local/global
@@ -272,7 +295,7 @@ def assemble_residual(U, U_old, M, dt,
 
 def assemble_jacobian(U, M, dt,
                       newton_data,
-                      kappa_fun, dkappa_du, K_cap,
+                      kappa_fun, dkappa_du,
                       r_growth,
                       dirichlet_dofs=None):
     """
@@ -286,6 +309,10 @@ def assemble_jacobian(U, M, dt,
     - J2 : dérivée du terme de diffusion non linéaire
     - J3 : dérivée du terme de réaction logistique
 
+    Comme pour le résidu, la capacité de charge K n'est plus donnée
+    par une fonction analytique K_cap(x), mais par un champ nodal
+    pré-calculé et interpolé aux points de Gauss via K_elem.
+
     Paramètres
     ----------
     U : ndarray
@@ -296,12 +323,15 @@ def assemble_jacobian(U, M, dt,
         Pas de temps.
     newton_data : dict
         Données FEM pré-calculées.
+        Doit contenir en particulier :
+        - les DDL élémentaires,
+        - les poids de quadrature,
+        - les gradients physiques,
+        - le champ élémentaire K_elem.
     kappa_fun : callable
         Diffusivité non linéaire kappa(u, x).
     dkappa_du : callable
         Dérivée de la diffusivité par rapport à u.
-    K_cap : callable
-        Capacité de charge locale K(x).
     r_growth : float
         Taux de croissance logistique.
     dirichlet_dofs : array-like, optionnel
@@ -327,6 +357,9 @@ def assemble_jacobian(U, M, dt,
     w = newton_data["w"]
     N = newton_data["N"]
     gradN_phys = newton_data["gradN_phys"]
+    K_elem = newton_data["K_elem"]
+    if K_elem is None:
+        raise ValueError("newton_data['K_elem'] est None : fournir K_nodal à preprocess_newton_data.")
 
     # ============================================================
     # 2) Initialisation des trois blocs de la jacobienne
@@ -355,15 +388,13 @@ def assemble_jacobian(U, M, dt,
             # ----------------------------------------------------
             u_g = 0.0
             grad_u_g = np.zeros(3)
+            K_g = 0.0
 
             for b in range(nloc):
                 u_g += Ue[b] * N[g, b]
                 grad_u_g += Ue[b] * gradN_phys[e, g, b]
+                K_g += K_elem[e, b] * N[g, b]
 
-            # ----------------------------------------------------
-            # Évaluation des coefficients non linéaires
-            # ----------------------------------------------------
-            K_g = float(K_cap(xg))
             kappa_g = float(kappa_fun(u_g, xg))
             dkappa_g = float(dkappa_du(u_g, xg))
 
@@ -441,7 +472,7 @@ def newton_solver(
     U_old,
     M, dt,
     newton_data,
-    kappa_fun, dkappa_du, K_cap, r_growth,
+    kappa_fun, dkappa_du, r_growth,
     dirichlet_dofs=None, dirichlet_vals=None,
     tol=1e-5, max_iter=20):
     """
@@ -455,6 +486,9 @@ def newton_solver(
         4. on met à jour :
                U^{k+1} = U^k + deltaU
 
+    Le terme de réaction logistique utilise la capacité de charge K
+    reconstruite à partir du champ nodal pré-calculé dans newton_data.
+
     Paramètres
     ----------
     U_init : ndarray
@@ -467,12 +501,12 @@ def newton_solver(
         Pas de temps.
     newton_data : dict
         Données FEM pré-calculées.
+        Contient notamment les informations géométriques, les gradients
+        physiques et le champ élémentaire K_elem.
     kappa_fun : callable
         Diffusivité non linéaire.
     dkappa_du : callable
         Dérivée de la diffusivité.
-    K_cap : callable
-        Capacité de charge locale.
     r_growth : float
         Taux de croissance logistique.
     dirichlet_dofs : array-like, optionnel
@@ -504,11 +538,11 @@ def newton_solver(
         # Étape A : assemblage du résidu
         # --------------------------------------------------------
         R = assemble_residual(
-            U, U_old, M, dt,
-            newton_data,
-            kappa_fun, K_cap, r_growth,
-            dirichlet_dofs, dirichlet_vals
-        )
+        U, U_old, M, dt,
+        newton_data,
+        kappa_fun, r_growth,
+        dirichlet_dofs, dirichlet_vals
+    )
 
         norm_R = np.linalg.norm(R)
 
@@ -521,11 +555,11 @@ def newton_solver(
         # Étape B : assemblage de la jacobienne
         # --------------------------------------------------------
         J = assemble_jacobian(
-            U, M, dt,
-            newton_data,
-            kappa_fun, dkappa_du, K_cap, r_growth,
-            dirichlet_dofs
-        )
+        U, M, dt,
+        newton_data,
+        kappa_fun, dkappa_du, r_growth,
+        dirichlet_dofs
+    )
 
         # --------------------------------------------------------
         # Étape C : résolution du système linéaire
