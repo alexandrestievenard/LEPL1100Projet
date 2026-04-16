@@ -49,6 +49,7 @@ from mass import assemble_mass
 from dirichlet import theta_step
 from plot_utils import plot_mesh_2d, plot_fe_solution_2d
 from newton_solver import newton_solver, preprocess_newton_data
+from animation import save_simulation_animation
 
 
 # =============================================================================
@@ -290,7 +291,7 @@ def main():
                         help="Schéma θ : 1=Euler implicite, 0.5=Crank-Nicolson")
     parser.add_argument("--dt",     type=float, default=0.5,
                         help="Pas de temps [années]")
-    parser.add_argument("--nsteps", type=int,   default=450,
+    parser.add_argument("--nsteps", type=int,   default=50,
                         help="Nombre de pas de temps. T_total = dt × nsteps")
     args = parser.parse_args()
 
@@ -403,11 +404,11 @@ def main():
     print(f"{'═' * 62}\n")
 
     # ── 5.10 Figure interactive (fond sombre cohérent avec colormap plasma) ─
-    plt.ion()
-    fig, ax = plt.subplots(figsize=(7, 7))
-    fig.patch.set_facecolor('#0d0d1a')
-    ax.set_facecolor('#0d0d1a')
-    cb = None
+    # plt.ion()
+    # fig, ax = plt.subplots(figsize=(7, 7))
+    # fig.patch.set_facecolor('#0d0d1a')
+    # ax.set_facecolor('#0d0d1a')
+    # cb = None
 
     # ==========================================================================
     # SECTION 6 — Boucle temporelle implicite
@@ -440,6 +441,17 @@ def main():
     print(f"  Résolution  : Newton-Raphson à chaque pas de temps")
     print(f"  dt={args.dt} an | T={args.dt * args.nsteps:.0f} ans | DDLs={num_dofs}")
 
+    # -----------------------------------------------------------------
+    # Stockage des snapshots pour créer l'animation après la simulation
+    # -----------------------------------------------------------------
+    saved_times = []
+    saved_fields = []
+
+    # On choisit à quelle fréquence physique on sauvegarde une frame
+    # Exemple : une frame tous les 0.5 ans
+    frame_every_years = 0.5
+    steps_per_frame = max(1, round(frame_every_years / args.dt))
+
     for step in range(args.nsteps):
         t = step * args.dt
 
@@ -462,55 +474,62 @@ def main():
         # Garde-fou numérique : u ≥ 0 en tout point
         U = np.maximum(U, 0.0)
 
+        # -------------------------------------------------------------
+        # Sauvegarde d'un snapshot à intervalles réguliers
+        # pour construire l'animation plus tard
+        # -------------------------------------------------------------
+        if step % steps_per_frame == 0:
+            saved_times.append(t)
+            saved_fields.append(U.copy())
+
         # ── Affichage (toutes les 3 étapes pour fluidifier l'animation) ───
         if step % 3 != 0:
             continue
 
-        ax.clear()
-        ax.set_facecolor('#0d0d1a')
+        #ax.clear()
+        #ax.set_facecolor('#0d0d1a')
 
-        contour = plot_fe_solution_2d(
-            elemNodeTags=elemNodeTags,
-            nodeTags=nodeTags,
-            nodeCoords=nodeCoords,
-            U=U,
-            tag_to_dof=tag_to_dof,
-            show_mesh=False,
-            ax=ax,
-            vmin=0.0,
-            vmax=K_FOREST,   # toute la gamme 0→80 est représentée)
-            cmap='plasma'
-        )
+        # contour = plot_fe_solution_2d(
+        #     elemNodeTags=elemNodeTags,
+        #     nodeTags=nodeTags,
+        #     nodeCoords=nodeCoords,
+        #     U=U,
+        #     tag_to_dof=tag_to_dof,
+        #     show_mesh=False,
+        #     ax=ax,
+        #     vmin=0.0,
+        #     vmax=K_FOREST,   # toute la gamme 0→80 est représentée)
+        #     cmap='plasma'
+        # )
 
-        add_overlays(ax, t)
-        make_legend(fig, ax, c_star)
+        # add_overlays(ax, t)
+        # make_legend(fig, ax, c_star)
 
-        ax.set_title(
-            f'Invasion du Frelon Asiatique — Fisher-KPP\n'
-            f't = {t:.1f} an  |  c* = {c_star:.1f} km/an',
-            color='white', fontsize=11, pad=10
-        )
-        ax.set_xlabel('x [km]', color='#aaaacc')
-        ax.set_ylabel('y [km]', color='#aaaacc')
-        ax.tick_params(colors='#aaaacc')
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#333355')
-        ax.axis('equal')
+        # ax.set_title(
+        #     f'Invasion du Frelon Asiatique — Fisher-KPP\n'
+        #     f't = {t:.1f} an  |  c* = {c_star:.1f} km/an',
+        #     color='white', fontsize=11, pad=10
+        # )
+        # ax.set_xlabel('x [km]', color='#aaaacc')
+        # ax.set_ylabel('y [km]', color='#aaaacc')
+        # ax.tick_params(colors='#aaaacc')
+        # for spine in ax.spines.values():
+        #     spine.set_edgecolor('#333355')
+        # ax.axis('equal')
 
-        if cb is None:
-            cb = fig.colorbar(contour, ax=ax,
-                              label='Densité u [ind/km²]',
-                              pad=0.02, fraction=0.03)
-            cb.ax.yaxis.label.set_color('white')
-            cb.ax.tick_params(colors='white')
+        # if cb is None:
+        #     cb = fig.colorbar(contour, ax=ax,
+        #                       label='Densité u [ind/km²]',
+        #                       pad=0.02, fraction=0.03)
+        #     cb.ax.yaxis.label.set_color('white')
+        #     cb.ax.tick_params(colors='white')
 
-        fig.tight_layout(rect=[0, 0.12, 1, 1])
-        fig.canvas.draw()
-        plt.pause(0.02)
-
+        # fig.tight_layout(rect=[0, 0.12, 1, 1])
+        # fig.canvas.draw()
+        # plt.pause(0.02)
         
-
         # ── Suivi console (toutes les 30 étapes) ──────────────────────────
+        print(f"step: {step}")
         if step % 30 == 0:
             u_core = U[urban_core_mask]
             n_inv  = np.sum(U > 1.0)
@@ -520,9 +539,23 @@ def main():
                 f"u_moy_cœur_urbain={np.mean(u_core):.2f} (K={K_URBAN})"
             )
 
+    save_simulation_animation(
+    saved_fields=saved_fields,
+    saved_times=saved_times,
+    elemNodeTags=elemNodeTags,
+    nodeTags=nodeTags,
+    nodeCoords=nodeCoords,
+    tag_to_dof=tag_to_dof,
+    K_FOREST=K_FOREST,
+    c_star=c_star,
+    add_overlays=add_overlays,
+    make_legend=make_legend,
+    output_file="invasion_frelon.gif",
+    fps=10)
+
     print("\nSimulation terminée.")
-    plt.ioff()
-    plt.show()
+    # plt.ioff()
+    # plt.show()
     gmsh_finalize()
 
 

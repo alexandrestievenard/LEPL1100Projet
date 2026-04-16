@@ -515,7 +515,6 @@ def newton_solver(
         # Si le résidu est suffisamment petit, on considère
         # que Newton a convergé.
         if norm_R < tol:
-            print(f"Newton convergé en {k} itérations | ||R|| = {norm_R:.3e}")
             break
 
         # --------------------------------------------------------
@@ -541,7 +540,6 @@ def newton_solver(
         # Critère secondaire : si la correction devient très petite,
         # on peut aussi arrêter Newton.
         if np.linalg.norm(deltaU) < tol:
-            print(f"Newton arrêté par petite correction en {k+1} itérations | ||deltaU|| = {np.linalg.norm(deltaU):.3e}")
             break
 
     return U
