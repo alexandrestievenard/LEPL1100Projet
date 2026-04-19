@@ -689,14 +689,14 @@ def main():
                         help="Ordre polynomial des éléments")
     parser.add_argument("--theta", type=float, default=1.0,
                         help="Paramètre theta du schéma")
-    parser.add_argument("--dt", type=float, default=0.05,
+    parser.add_argument("--dt", type=float, default=0.1,
                         help="Pas de temps [années]")
-    parser.add_argument("--nsteps", type=int, default=30,
+    parser.add_argument("--nsteps", type=int, default=600,
                         help="Nombre de pas de temps")
     parser.add_argument("--method", type=str, default="newton",
                         choices=["imex", "newton"],
                         help="Méthode temporelle")
-    parser.add_argument("--save_every", type=int, default=3,
+    parser.add_argument("--save_every", type=int, default=5,
                         help="Sauvegarde un snapshot tous les save_every pas")
     parser.add_argument("--no_visu", action="store_true",
                         help="Ne pas afficher la visualisation finale")
