@@ -1,27 +1,6 @@
 # =============================================================================
 # main_diffusion_2d.py — Simulation Fisher-KPP 2D : invasion du frelon asiatique
 # =============================================================================
-#
-# MODÈLE :
-#   ∂u/∂t - ∇·(κ(u,x)∇u) = r·u·(1 - u/K(x))
-#
-# CHANGEMENTS POUR LA CORSE :
-#   - suppression complète du lac
-#   - mer modélisée par Dirichlet sur OuterBoundary : u = 0
-#   - halo côtier défavorable via K(x) plus faible près de la côte
-#   - hotspot bocager intérieur conservé
-#   - métropole conservée
-#
-# CHANGEMENTS POUR κ(u,x) NON LINÉAIRE (travail d'Alexandre, adapté en IMEX) :
-#   - κ dépend maintenant de u : faible densité = mobilité normale,
-#     forte densité = mobilité réduite (compétition pour l'espace)
-#   - schéma IMEX : κ évalué avec u^n (connu) → système reste LINÉAIRE
-#   - K réassemblée à chaque pas de temps (coût modéré ~400 nœuds)
-#
-# PRÉREQUIS :
-#   python msh.py
-#   python main_diffusion_2d.py
-# =============================================================================
 
 import argparse
 import math
@@ -48,14 +27,20 @@ from plot_utils import plot_mesh_2d, plot_fe_solution_2d
 # =============================================================================
 # SECTION 1 — Constantes géographiques
 # =============================================================================
+K_URBAN = 1.5
+CITIES = [
+    ("Ajaccio",       23.0,  58.0, 4.0, 9.0),
+    ("Bastia",        70.2,  148.0, 3.5, 8.0),
+    ("Porto-Vecchio", 67.0,  25.5, 2.2, 5.0),
+    ("Corte",         50.0,  106.25, 1.6, 3.5),
+    ("Calvi",         19.5, 132.0, 1.8, 4.0),
+]
 
-CITY_CX, CITY_CY = 23.0, 58.0
-CITY_R_HARD = 5.0
-CITY_R_SOFT = 12.0
-
-MTN1_CX, MTN1_CY = 35.0, 106.0
-MTN2_CX, MTN2_CY = 47.0, 72.0
-MTN3_CX, MTN3_CY = 54.0, 53.0
+MTN1_CX, MTN1_CY = 37.0, 114.0
+MTN2_CX, MTN2_CY = 44.0, 96.0
+MTN3_CX, MTN3_CY = 49.0, 78.0
+MTN4_CX, MTN4_CY = 50.6, 68.2
+MTN5_CX, MTN5_CY = 51.2, 50.0
 
 BOCAGE_CX, BOCAGE_CY = 68.0, 115.0
 
@@ -99,24 +84,24 @@ ALPHA_KAPPA = 0.02   # [km²/ind] — intensité de l'effet densité   ◄◄◄
 #   Dans le schéma IMEX, kappa_fun est appelée avec u = U[n] (connu)
 #   → le système reste linéaire en U^{n+1}, pas besoin de Newton.
 
-def kappa_base(x):                                             # ◄◄◄ MOD 3
-    """
-    Partie spatiale de la diffusivité κ₀(x,y) [km²/an].
-    Identique à l'ancienne fonction kappa_fun(x) :
-      - faible dans le cœur urbain (béton, lumières)
-      - transition linéaire dans la couronne péri-urbaine
-      - rurale ailleurs
-    """
-    dist = math.sqrt((x[0] - CITY_CX)**2 + (x[1] - CITY_CY)**2)
+def kappa_base(x):
 
-    if dist < CITY_R_HARD:
-        return KAPPA_URBAN
+    kappa_val = KAPPA_RURAL
 
-    if dist < CITY_R_SOFT:
-        t = (dist - CITY_R_HARD) / (CITY_R_SOFT - CITY_R_HARD)
-        return KAPPA_URBAN + t * (KAPPA_RURAL - KAPPA_URBAN)
+    for _, cx, cy, r_hard, r_soft in CITIES:
+        dist = math.sqrt((x[0] - cx)**2 + (x[1] - cy)**2)
 
-    return KAPPA_RURAL
+        if dist < r_hard:
+            local_kappa = KAPPA_URBAN
+        elif dist < r_soft:
+            t = (dist - r_hard) / (r_soft - r_hard)
+            local_kappa = KAPPA_URBAN + t * (KAPPA_RURAL - KAPPA_URBAN)
+        else:
+            local_kappa = KAPPA_RURAL
+
+        kappa_val = min(kappa_val, local_kappa)
+
+    return kappa_val
 
 
 def kappa_fun(u, x):                                           # ◄◄◄ MOD 3
@@ -151,31 +136,47 @@ def add_overlays(ax, t_year):
     theta_arc = np.linspace(0, 2 * math.pi, 300)
     halo = [pe.withStroke(linewidth=2, foreground='black')]
 
-    ax.plot(
-        CITY_CX + CITY_R_HARD * np.cos(theta_arc),
-        CITY_CY + CITY_R_HARD * np.sin(theta_arc),
-        color=CYAN, lw=1.5, ls='-', zorder=10, alpha=0.9
-    )
-    ax.plot(
-        CITY_CX + CITY_R_SOFT * np.cos(theta_arc),
-        CITY_CY + CITY_R_SOFT * np.sin(theta_arc),
-        color=CYAN, lw=0.8, ls='--', zorder=10, alpha=0.6
-    )
+    # Villes
+    for name, cx, cy, r_hard, r_soft in CITIES:
+        ax.plot(
+            cx + r_hard * np.cos(theta_arc),
+            cy + r_hard * np.sin(theta_arc),
+            color=CYAN, lw=1.5, ls='-', zorder=10, alpha=0.9
+        )
+        ax.plot(
+            cx + r_soft * np.cos(theta_arc),
+            cy + r_soft * np.sin(theta_arc),
+            color=CYAN, lw=0.8, ls='--', zorder=10, alpha=0.6
+        )
 
-    ax.text(CITY_CX, CITY_CY,
-            'Métropole\n(K=1.5)', color=CYAN,
-            fontsize=7.5, ha='center', va='center',
-            fontweight='bold', zorder=11, path_effects=halo)
+        ax.text(
+            cx, cy,
+            f'{name}\n(K={K_URBAN})',
+            color=CYAN,
+            fontsize=6.8,
+            ha='center', va='center',
+            fontweight='bold',
+            zorder=11,
+            path_effects=halo
+        )
 
-    ax.text(CITY_CX, CITY_CY - CITY_R_SOFT - 2.5,
-            'banlieues (K→50)', color=CYAN,
-            fontsize=6, ha='center', zorder=11, path_effects=halo)
+        ax.text(
+            cx, cy - r_soft - 2.0,
+            'banlieues (K→50)',
+            color=CYAN,
+            fontsize=5.5,
+            ha='center',
+            zorder=11,
+            path_effects=halo
+        )
 
+    # Bocage
     ax.text(BOCAGE_CX, BOCAGE_CY,
             'Bocage\n(K=80)', color=GOLD,
             fontsize=6.5, ha='center', va='center',
             zorder=11, alpha=0.85, path_effects=halo)
 
+    # Massifs
     ax.text(MTN1_CX, MTN1_CY,
             'Massif\n(flux=0)', color=LORANGE,
             fontsize=7.0, ha='center', va='center',
@@ -188,9 +189,20 @@ def add_overlays(ax, t_year):
 
     ax.text(MTN3_CX, MTN3_CY,
             'Massif\n(flux=0)', color=LORANGE,
-            fontsize=7.0, ha='center', va='center',
+            fontsize=4.0, ha='center', va='center',
+            fontweight='bold', zorder=11, path_effects=halo)
+    
+    ax.text(MTN4_CX, MTN4_CY,
+            'Massif\n(flux=0)', color=LORANGE,
+            fontsize=6.0, ha='center', va='center',
+            fontweight='bold', zorder=11, path_effects=halo)
+    
+    ax.text(MTN5_CX, MTN5_CY,
+            'Massif\n(flux=0)', color=LORANGE,
+            fontsize=4.0, ha='center', va='center',
             fontweight='bold', zorder=11, path_effects=halo)
 
+    # Foyer initial
     ax.plot(X0, Y0, 'x', color='white', ms=6, mew=1.5, zorder=12)
     if t_year < 15:
         ax.text(X0 + 5, Y0 + 5, 'Foyer\ninitial', color='white',
@@ -293,6 +305,7 @@ def main():
     for i in range(num_dofs):
         x = dof_coords[i]
 
+        # Effet côtier
         d_coast = dist_coast_nodal[i]
         if d_coast < COAST_BAND:
             t = d_coast / COAST_BAND
@@ -300,29 +313,39 @@ def main():
         else:
             K_base = K_RURAL
 
-        dist_city = math.sqrt((x[0] - CITY_CX)**2 + (x[1] - CITY_CY)**2)
-        if dist_city < CITY_R_HARD:
-            K_city = K_URBAN
-        elif dist_city < CITY_R_SOFT:
-            t_city = (dist_city - CITY_R_HARD) / (CITY_R_SOFT - CITY_R_HARD)
-            K_city = K_URBAN + t_city * (K_RURAL - K_URBAN)
-        else:
-            K_city = K_RURAL
+        # Effet urbain : on prend la ville la plus pénalisante
+        K_city = K_RURAL
+        for _, cx, cy, r_hard, r_soft in CITIES:
+            dist_city = math.sqrt((x[0] - cx)**2 + (x[1] - cy)**2)
+
+            if dist_city < r_hard:
+                local_K = K_URBAN
+            elif dist_city < r_soft:
+                t_city = (dist_city - r_hard) / (r_soft - r_hard)
+                local_K = K_URBAN + t_city * (K_RURAL - K_URBAN)
+            else:
+                local_K = K_RURAL
+
+            K_city = min(K_city, local_K)
 
         K_local = min(K_base, K_city)
 
+        # Bonus bocager
         dist_bocage = math.sqrt((x[0] - BOCAGE_CX)**2 + (x[1] - BOCAGE_CY)**2)
         forest_factor = math.exp(-dist_bocage / 25.0)
         K_bonus = (K_FOREST - K_RURAL) * forest_factor
 
         K_nodal[i] = K_local + K_bonus
 
-    # ── 5.7 Masque urbain pour suivi console ──────────────────────────────
-    dist_city_nodal = np.array([
-        math.sqrt((dof_coords[i, 0] - CITY_CX)**2 + (dof_coords[i, 1] - CITY_CY)**2)
-        for i in range(num_dofs)
-    ])
-    urban_core_mask = dist_city_nodal < CITY_R_HARD
+    # ── 5.7 Masques urbains pour suivi console ────────────────────────────
+    city_core_masks = {}
+
+    for name, cx, cy, r_hard, _ in CITIES:
+        dist_city_nodal = np.array([
+            math.sqrt((dof_coords[i, 0] - cx)**2 + (dof_coords[i, 1] - cy)**2)
+            for i in range(num_dofs)
+        ])
+        city_core_masks[name] = dist_city_nodal < r_hard
 
     # ── 5.8 Condition initiale ────────────────────────────────────────────
     R0 = 5.0
@@ -446,9 +469,8 @@ def main():
 
         U = np.maximum(U, 0.0)
         U[dir_dofs] = 0.0
-
-        if step % 3 != 0:
-            continue
+        
+        
 
         ax.clear()
         ax.set_facecolor('#0d0d1a')
@@ -459,7 +481,7 @@ def main():
             nodeCoords=nodeCoords,
             U=U,
             tag_to_dof=tag_to_dof,
-            show_mesh=False,
+            show_mesh=True,
             ax=ax,
             vmin=0.0,
             vmax=K_FOREST,
@@ -495,15 +517,19 @@ def main():
         plt.pause(0.02)
 
         if step % 30 == 0:
-            u_core = U[urban_core_mask]
-            n_inv  = np.sum(U > 1.0)
+            n_inv = np.sum(U > 1.0)
+
+            city_stats = " | ".join(
+                f"{name}={np.mean(U[mask]):.2f}"
+                for name, mask in city_core_masks.items()
+            )
+
             print(
                 f"  t={t:5.1f} an | u_max={np.max(U):5.1f} | "
                 f"envahis (u>1): {100 * n_inv // num_dofs}% | "
-                f"u_moy_cœur_urbain={np.mean(u_core):.2f} | "
+                f"{city_stats} | "
                 f"u_moy_côte={np.mean(U[dist_coast_nodal < 5.0]):.2f}"
             )
-
     print("\nSimulation terminée.")
     plt.ioff()
     plt.show()
