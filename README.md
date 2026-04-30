@@ -56,6 +56,7 @@ python runsimulation.py [OPTIONS]
 | `--save_every` | `5` | Sauvegarde un snapshot tous les N pas |
 | `--live` | désactivé | Active l’affichage interactif en temps réel |
 | `--no_visu` | désactivé | Désactive la génération du GIF final |
+| `--show_mesh` | désactivé | Affiche le maillage du domaine |
 
 ---
 
@@ -117,8 +118,3 @@ Le programme génère les résultats suivants :
 | `dirichlet.py` | Imposition des conditions de Dirichlet |
 | `plot_utils.py` | Visualisation et animation |
 
----
-
-## Remarques
-
-Le code est entièrement commenté et modulaire.

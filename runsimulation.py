@@ -716,10 +716,23 @@ def main():
     parser.add_argument("--save_every", type=int, default=5, help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
     parser.add_argument("--live", action="store_true", help="Affichage en temps réel pendant le calcul")
     parser.add_argument("--no_visu", action="store_true", help="Ne génère pas de GIF à la fin")
+    parser.add_argument("--show_mesh", action="store_true",help="Affiche le maillage de la Corse avant de lancer la simulation")
     args = parser.parse_args()
 
-    #préparation (maillage, matrices, K_nodal, U0, ...)
     problem = build_problem(order=args.order)
+    if args.show_mesh:
+        from plot_utils import plot_mesh_2d
+        print("Affichage du maillage de la Corse...")
+        plot_mesh_2d(
+            elemType=problem["elemType"],
+            nodeTags=problem["nodeTags"],
+            nodeCoords=problem["nodeCoords"],
+            elemTags=problem["elemTags"],
+            elemNodeTags=problem["elemNodeTags"],
+            bnds=problem["bnds"],
+            bnds_tags=problem["bnds_tags"]
+        )
+        plt.show(block=True)
 
     # Résumé des paramètres avant de lancer
     c_star  = 2.0 * math.sqrt(KAPPA_RURAL * R_GROWTH)
