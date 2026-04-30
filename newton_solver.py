@@ -31,10 +31,6 @@ from scipy.sparse.linalg import spsolve
 import numpy as np
 
 
-# =============================================================================
-# FONCTION 1 — Prétraitement : données FEM indépendantes de u et du temps
-# =============================================================================
-
 def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof, K_nodal=None):
     """
     Pré-calcule une fois pour toutes les données FEM qui ne changent pas
@@ -121,10 +117,6 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
         "K_elem": K_elem,
     }
 
-
-# =============================================================================
-# FONCTION 2 — Assemblage du résidu R(U)
-# =============================================================================
 
 def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichlet_dofs=None, dirichlet_vals=None):
     """
@@ -221,11 +213,6 @@ def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichl
         R[dirichlet_dofs] = U[dirichlet_dofs] - dirichlet_vals
 
     return R
-
-
-# =============================================================================
-# FONCTION 3 — Assemblage de la jacobienne J(U) = ∂R/∂U
-# =============================================================================
 
 def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dirichlet_dofs=None):
     """
@@ -335,7 +322,7 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
 
     J = (J1 + J2 - J3).tolil()
 
-    # --- Conditions de Dirichlet dans la jacobienne ---
+    #Conditions de Dirichlet dans la jacobienne
     # Pour chaque DDL imposé i :
     #   - ligne i → identité : [0 ... 1 ... 0]  (δU_i = -R_i/1 = 0 car R_i=U_i-U_D_i)
     #   - colonne i → zéro dans toutes les autres lignes
@@ -356,11 +343,6 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
             J.data[row] = new_vals
 
     return J.tocsr()
-
-
-# =============================================================================
-# FONCTION 4 — Boucle Newton-Raphson
-# =============================================================================
 
 def newton_solver(U_init, U_old, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dirichlet_dofs=None, dirichlet_vals=None, tol=1e-5, max_iter=20):
     """

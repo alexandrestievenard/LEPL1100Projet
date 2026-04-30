@@ -1,30 +1,14 @@
-# =============================================================================
-# plot_utils.py — Utilitaires de visualisation des solutions éléments finis
-# =============================================================================
-#
+
 # Contient trois fonctions de tracé :
 #
-#   plot_fe_solution_high_order : tracé 1D haute précision (rééchantillonnage)
+#   plot_fe_solution_high_order : tracé 1D (rééchantillonnage)
 #   plot_mesh_2d                : affichage du maillage 2D avec frontières colorées
 #   plot_fe_solution_2d         : tracé 2D de la solution par tricontourf
-#
-# CHOIX DU COLORMAP 'plasma' :
-#   Contrairement à 'seismic' (centré sur 0, donne un rose parasite pour u≈0)
-#   ou 'YlOrRd' (commence blanc, masque les faibles densités en fond jaune),
-#   'plasma' commence dans les tons sombres (noir/violet) pour u=0 et monte
-#   vers le jaune vif pour u=vmax. Cela rend le front d'invasion immédiatement
-#   visible même pour de très faibles densités.
-# =============================================================================
  
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 import gmsh
-
-
-# -----------------------------------------------------------------------------
-# SECTION 1 — Tracé 1D haute précision (solution haute-ordre)
-# -----------------------------------------------------------------------------
 
 def plot_fe_solution_high_order(
     elemType, elemNodeTags, nodeCoords, U,
@@ -85,11 +69,6 @@ def plot_fe_solution_high_order(
     ax.set_ylabel("u_h")
     ax.grid(True)
     return ax
-
-
-# -----------------------------------------------------------------------------
-# SECTION 2 — Affichage du maillage 2D avec frontières colorées
-# -----------------------------------------------------------------------------
 
 def setup_interactive_figure(xlim=None, ylim=None):
     """Crée une figure matplotlib interactive (pour animation en temps réel)."""
@@ -153,10 +132,6 @@ def plot_mesh_2d(elemType, nodeTags, nodeCoords, elemTags, elemNodeTags,
     plt.axis(False)
     plt.show()
 
-
-# -----------------------------------------------------------------------------
-# SECTION 3 — Tracé 2D de la solution par remplissage de contours
-# -----------------------------------------------------------------------------
 
 def plot_fe_solution_2d(elemNodeTags, nodeCoords, nodeTags, U, tag_to_dof,
                         show_mesh=False, ax=None,

@@ -1,5 +1,3 @@
-# Coordonnées simplifiées de la Corse en km
-# origine projetée (m) : xmin=1156968.899999805, ymin=6049680.000003047
 CORSE_XY = [
     (75.263700, 66.592000),
     (76.694500, 39.719300),

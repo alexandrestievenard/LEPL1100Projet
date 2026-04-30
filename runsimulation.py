@@ -143,13 +143,12 @@ def kappa_fun(u, x):
     système linéaire en u^{n+1}.
     Dans Newton, appelée avec u = U^{n+1,(k)} à chaque itération.
     """
-    u_pos = max(u, 0.0)   # garde-fou : u ne peut pas être négatif
+    u_pos = max(u, 0.0)
     return kappa_base(x) / (1.0 + ALPHA_KAPPA * u_pos)
 
 
 def dkappa_du(u, x):
     """
-    Dérivée partielle ∂κ/∂u(u, x).
 
     Nécessaire uniquement pour Newton, qui l'utilise pour construire
     la jacobienne du terme de diffusion (second terme de J2).
@@ -180,12 +179,10 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
       - les données pré-calculées pour Newton (newton_data)
     """
 
-    # ── 4.1 Chargement du maillage ────────────────────────────────────────
     gmsh_init(gmsh_model_name)
-    elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags = \
-        open_2d_mesh(msh_filename=msh_filename, order=order)
+    elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags = open_2d_mesh(msh_filename=msh_filename, order=order)
 
-    # ── 4.2 Construction du mapping tag Gmsh → indice DDL compact ─────────
+    # Construction du mapping tag Gmsh → indice DDL compac
     #
     # Problème : Gmsh numérote les nœuds avec des "tags" qui peuvent
     # commencer à 1 et avoir des trous (1, 2, 5, 7, ...).
@@ -212,23 +209,14 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
         tag_to_dof[tag_int] = i
         dof_coords[i]     = all_coords[tag_to_node_index[tag_int]]
 
-    # ── 4.3 Points de quadrature et jacobiens ─────────────────────────────
-    #
-    # Ces données géométriques sont fixes (ne dépendent que du maillage).
-    # Elles sont calculées une seule fois et réutilisées à chaque assemblage.
+    # Points de quadrature et jacobiens - fixes et calculés une seule fois
     xi, w, N, gN    = prepare_quadrature_and_basis(elemType, order)
     jac, det, coords = get_jacobians(elemType, xi)
 
-    # ── 4.4 Conditions aux limites ─────────────────────────────────────────
-    #
+    # ── CL
     # OuterBoundary (côte) → Dirichlet u = 0
     #   La mer est une zone létale : les frelons qui atteignent l'eau meurent.
-    #   On impose u = 0 sur toute la frontière extérieure.
-    #
     # Mountains (massifs) → Neumann flux = 0 (condition naturelle)
-    #   Les frelons ne peuvent pas franchir les massifs.
-    #   En EF, ne pas assembler de terme de bord revient automatiquement
-    #   à imposer un flux nul : aucune action particulière requise.
     bnd_names = [name for name, _ in bnds]
 
     def get_dofs(bnd_name):
@@ -243,8 +231,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     dir_dofs   = outer_dofs.astype(int)
     dir_vals   = np.zeros(len(dir_dofs), dtype=float)   # u = 0 sur la côte
 
-    # ── 4.5 Distance de chaque nœud à la côte ─────────────────────────────
-    #
+
     # On approxime la côte par l'ensemble de ses nœuds du maillage.
     # Un arbre KD (structure de données spatiale) permet de répondre en
     # O(log n) à la question "quel est le nœud côtier le plus proche ?"
@@ -254,33 +241,17 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     coast_tree = cKDTree(coast_xy)
     dist_coast_nodal, _ = coast_tree.query(dof_coords[:, :2])
 
-    # ── 4.6 Champ K_nodal — capacité de charge locale ─────────────────────
-    #
-    # K(x) est construit nœud par nœud en superposant trois effets :
-    #
-    #   1. Halo côtier : K décroît de K_RURAL à K_COAST sur une bande de
-    #      COAST_BAND km depuis la mer. Modélise l'exposition aux embruns,
-    #      au vent marin, et l'absence de végétation au bord de l'eau.
-    #
-    #   2. Effet urbain : chaque ville réduit K selon le même profil que κ.
-    #      On prend le minimum sur toutes les villes (la plus pénalisante).
-    #
-    #   3. Bonus bocager : gaussienne exponentielle centrée sur le bocage
-    #      nord-est, qui fait monter K jusqu'à K_FOREST = 80 ind/km².
-    #      Modélise un environnement idéal (haies, petits bois, ressources).
-    #
-    # K_nodal est ensuite stocké en mémoire et réutilisé à chaque pas de temps.
     K_nodal = np.empty(num_dofs, dtype=float)
 
     for i in range(num_dofs):
         x = dof_coords[i]
 
-        # Contribution 1 : halo côtier
+        #halo côtier
         d_coast = dist_coast_nodal[i]
         K_base  = (K_COAST + (d_coast / COAST_BAND) * (K_RURAL - K_COAST)
                    if d_coast < COAST_BAND else K_RURAL)
 
-        # Contribution 2 : effet urbain (ville la plus restrictive)
+        #effet urbain (ville la plus restrictive)
         K_city = K_RURAL
         for _, cx, cy, r_hard, r_soft in CITIES:
             dist_city = math.sqrt((x[0] - cx)**2 + (x[1] - cy)**2)
@@ -295,14 +266,12 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
 
         K_local = min(K_base, K_city)
 
-        # Contribution 3 : bonus bocager (exponentielle décroissante)
+        # bonus bocager (exponentielle décroissante)
         dist_bocage = math.sqrt((x[0] - BOCAGE_CX)**2 + (x[1] - BOCAGE_CY)**2)
         K_bonus     = (K_FOREST - K_RURAL) * math.exp(-dist_bocage / 25.0)
 
         K_nodal[i] = K_local + K_bonus
 
-    # ── 4.7 Masques de diagnostic par ville ────────────────────────────────
-    #
     # Pour chaque ville, on crée un masque booléen indiquant quels nœuds
     # se trouvent dans sa zone d'influence (r_soft).
     #
@@ -318,9 +287,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
         ])
         city_core_masks[name] = dist_city_nodal < r_soft
 
-    # ── 4.8 Condition initiale : foyer gaussien ────────────────────────────
-    #
-    # On modélise l'introduction initiale des frelons par une cloche
+    # On modélise l'introduction initiale des frelons par une 
     # gaussienne 2D centrée en (X0, Y0) au sud de l'île.
     # L'amplitude A0 et le rayon R0 définissent la taille du foyer.
     #
@@ -338,8 +305,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     U0 = np.minimum(U0, K_nodal)
     U0[dir_dofs] = 0.0
 
-    # ── 4.9 Matrice de masse ──────────────────────────────────────────────
-    #
+
     # M ne dépend que de la géométrie → assemblée une seule fois ici.
     # M_lump (somme de chaque ligne) est utilisée dans l'IMEX pour évaluer
     # la réaction explicite nœud par nœud sans multiplication matricielle.
@@ -347,7 +313,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     M      = M_lil.tocsr()
     M_lump = np.array(M.sum(axis=1)).flatten()
 
-    # ── 4.10 Prétraitement Newton ─────────────────────────────────────────
+    # Prétraitement Newton 
     #
     # preprocess_newton_data calcule une seule fois des quantités coûteuses
     # (inversions de jacobiens, gradients physiques) qui sont réutilisées
@@ -355,7 +321,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     #
     # Encapsulé dans try/except : si on n'utilise que l'IMEX, ce calcul
     # est inutile. S'il échoue pour une raison quelconque, newton_data
-    # vaut None et l'IMEX continue de fonctionner normalement.
+    # vaut None et l'IMEX continue de fonctionner normalement,
     try:
         from newton_solver import preprocess_newton_data
         newton_data = preprocess_newton_data(
@@ -367,7 +333,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh",
     except Exception:
         newton_data = None
 
-    # ── 4.11 Dictionnaire retourné ────────────────────────────────────────
+    # dictionnaire retourné
     return {
         # maillage brut (nécessaire pour la visualisation)
         "elemType": elemType, "nodeTags": nodeTags, "nodeCoords": nodeCoords,
@@ -426,7 +392,7 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
     dir_vals         = problem["dir_vals"]
     city_core_masks  = problem["city_core_masks"]
     dist_coast_nodal = problem["dist_coast_nodal"]
-    U        = problem["U0"].copy()   # on travaille sur une copie de U0
+    U        = problem["U0"].copy()   # copie
     num_dofs = len(U)
 
     saved_times  = []
@@ -435,9 +401,9 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
     # Les clés dynamiques (f"u_mean_{name}") permettent de suivre chaque
     # ville sans dupliquer le code — la liste s'adapte à CITIES automatiquement.
     diagnostics = {
-        "u_max":            [],
+        "u_max": [],
         "invaded_fraction": [],
-        "u_mean_coast":     [],
+        "u_mean_coast":[],
         **{f"u_mean_{name}": [] for name in city_core_masks},
     }
 
@@ -446,13 +412,11 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
     else:
         fig = ax = cb = None
 
-    # =========================================================================
-    # Boucle principale
-    # =========================================================================
+    #boucle temporelle principale
     for step in range(nsteps):
         t = step * dt   # temps physique au début du pas courant
 
-        # --- Avance d'un pas de temps ---
+        # avance d'un pas de temps
         if method == "imex":
             # Diffusion implicite + réaction explicite → système linéaire
             U = imex_step(U, problem, dt, theta)
@@ -477,7 +441,6 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
         else:
             raise ValueError(f"Méthode inconnue : '{method}'. Choisir 'imex' ou 'newton'.")
 
-        # --- Sauvegarde du snapshot ---
         # On sauvegarde U tous les save_every pas. Le calcul continue
         # normalement entre les sauvegardes : save_every n'affecte pas
         # la physique, seulement la résolution temporelle du GIF.
@@ -485,7 +448,6 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
             saved_times.append(t + dt)
             saved_fields.append(U.copy())
 
-        # --- Calcul des diagnostics ---
         n_inv = np.sum(U > 1.0)   # nœuds avec plus d'1 ind/km² (invasion établie)
         diagnostics["u_max"].append(np.max(U))
         diagnostics["invaded_fraction"].append(n_inv / num_dofs)
@@ -493,13 +455,11 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
         for name, mask in city_core_masks.items():
             diagnostics[f"u_mean_{name}"].append(np.mean(U[mask]))
 
-        # --- Affichage en temps réel (mode --live) ---
         # On ne redessine que tous les 3 pas pour limiter le coût
-        # de rendu matplotlib qui peut être plus lent que le calcul.
+        # de rendu matplotlib qui peut être plus lent que le calcul
         if live and step % 3 == 0:
             cb = _update_live_figure(fig, ax, cb, problem, U, t, method)
 
-        # --- Progression dans la console ---
         # Tous les 30 pas (= toutes les 3 ans avec dt=0.1) pour rester lisible.
         if step % 30 == 0 or step == nsteps - 1:
             city_stats = " | ".join(
@@ -517,13 +477,13 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
         plt.show()
 
     return {
-        "times":       np.array(saved_times),
-        "fields":      saved_fields,
+        "times": np.array(saved_times),
+        "fields": saved_fields,
         "diagnostics": diagnostics,
         "final_state": U.copy(),
-        "method":      method,
-        "dt":          dt,
-        "nsteps":      nsteps,
+        "method":method,
+        "dt":dt,
+        "nsteps":nsteps,
     }
 
 
@@ -531,16 +491,15 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
 # SECTION 6 — Visualisation
 # =============================================================================
 
-CYAN    = '#00E5FF'   # couleur des annotations de villes
-GOLD    = '#FFD700'   # couleur du bocage
-LORANGE = '#FFAB40'   # couleur des massifs
+CYAN    = '#00E5FF' 
+GOLD    = '#FFD700'  
+LORANGE = '#FFAB40'   
 
-# Liste des massifs avec leur position et taille de police
 # (les petits massifs ont un fontsize réduit pour éviter le chevauchement)
 MASSIFS = [
-    (MTN1_CX, MTN1_CY, 7.0),   # Monte Cinto    — grand massif
-    (MTN2_CX, MTN2_CY, 7.0),   # Monte Rotondo  — grand massif
-    (MTN3_CX, MTN3_CY, 4.0),   # Monte d'Oro    — petit, fontsize réduit
+    (MTN1_CX, MTN1_CY, 7.0),   # Monte Cinto — grand massif
+    (MTN2_CX, MTN2_CY, 7.0),   # Monte Rotondo — grand massif
+    (MTN3_CX, MTN3_CY, 4.0),   # Monte d'Oro — petit, fontsize réduit
     (MTN4_CX, MTN4_CY, 6.0),   # Monte Renoso
     (MTN5_CX, MTN5_CY, 4.0),   # Monte Incudine — petit, fontsize réduit
 ]
@@ -747,34 +706,19 @@ def save_results_animation(problem, results, output_file="simulation.gif",
     print(f"Animation sauvegardée : {output_file}")
 
 
-# =============================================================================
-# SECTION 7 — Programme principal
-# =============================================================================
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Fisher-KPP 2D — Invasion du frelon asiatique (Vespa velutina)"
-    )
-    parser.add_argument("-order",       type=int,   default=1,
-                        help="Ordre polynomial des éléments (défaut : 1)")
-    parser.add_argument("--theta",      type=float, default=1.0,
-                        help="θ du schéma (1.0=Euler implicite, 0.5=Crank-Nicolson)")
-    parser.add_argument("--dt",         type=float, default=0.1,
-                        help="Pas de temps [années] (défaut : 0.1)")
-    parser.add_argument("--nsteps",     type=int,   default=600,
-                        help="Nombre de pas de temps (défaut : 600 → 60 ans)")
-    parser.add_argument("--method",     type=str,   default="imex",
-                        choices=["imex", "newton"],
-                        help="Méthode temporelle (défaut : imex)")
-    parser.add_argument("--save_every", type=int,   default=5,
-                        help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
-    parser.add_argument("--live",       action="store_true",
-                        help="Affichage en temps réel pendant le calcul")
-    parser.add_argument("--no_visu",    action="store_true",
-                        help="Ne génère pas de GIF à la fin")
+    parser = argparse.ArgumentParser(description="Fisher-KPP 2D — Invasion du frelon asiatique (Vespa velutina)")
+    parser.add_argument("-order", type=int, default=1, help="Ordre polynomial des éléments (défaut : 1)")
+    parser.add_argument("--theta",type=float, default=1.0, help="θ du schéma (1.0=Euler implicite, 0.5=Crank-Nicolson)")
+    parser.add_argument("--dt", type=float, default=0.1, help="Pas de temps [années] (défaut : 0.1)")
+    parser.add_argument("--nsteps", type=int, default=600, help="Nombre de pas de temps (défaut : 600 → 60 ans)")
+    parser.add_argument("--method",type=str, default="imex", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
+    parser.add_argument("--save_every", type=int, default=5, help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
+    parser.add_argument("--live", action="store_true", help="Affichage en temps réel pendant le calcul")
+    parser.add_argument("--no_visu", action="store_true", help="Ne génère pas de GIF à la fin")
     args = parser.parse_args()
 
-    # Phase 1 : préparation (maillage, matrices, K_nodal, U0, ...)
+    #préparation (maillage, matrices, K_nodal, U0, ...)
     problem = build_problem(order=args.order)
 
     # Résumé des paramètres avant de lancer
@@ -793,7 +737,6 @@ def main():
     print(f"  DDLs={problem['num_dofs']}  |  stabilité : dt·r={args.dt*R_GROWTH:.2f} < 1 ✓")
     print(f"{'═' * 62}\n")
 
-    # Phase 2 : simulation (boucle temporelle)
     results = run_simulation(
         problem,
         method=args.method,
@@ -804,16 +747,14 @@ def main():
         live=args.live,
     )
 
-    # Résumé final
     print(f"\nSimulation terminée.")
     print(f"  Snapshots sauvegardés : {len(results['fields'])}")
     print(f"  u_max final           = {results['diagnostics']['u_max'][-1]:.3f} ind/km²")
     print(f"  Fraction envahie      = {results['diagnostics']['invaded_fraction'][-1]:.1%}")
 
-    # Phase 3 : post-traitement (génération du GIF)
+    #post-traitement (génération du GIF)
     if not args.no_visu:
-        save_results_animation(problem, results,
-                                output_file="simulation.gif", stride=1, fps=10)
+        save_results_animation(problem, results,output_file="simulation.gif", stride=1, fps=10)
 
     gmsh_finalize()
     return problem, results

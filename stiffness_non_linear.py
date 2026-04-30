@@ -1,6 +1,4 @@
-# =============================================================================
-# stiffness_non_linear.py
-# =============================================================================
+
 # Assemblage de la matrice de rigidité K et du vecteur de charge F pour
 # l'équation de diffusion avec diffusivité non linéaire :
 #
@@ -18,7 +16,6 @@
 # Dans le schéma IMEX, cette fonction est appelée avec U = u^n (connu),
 # ce qui fait de κ(u^n, x) une simple fonction d'espace : le système
 # résultant reste linéaire en u^{n+1}.
-# =============================================================================
 
 import numpy as np
 from scipy.sparse import lil_matrix
@@ -49,14 +46,14 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
     F : ndarray   (nn,)      — vecteur de charge
     """
 
-    # --- Dimensions du problème ---
+    #Dimensions du problème
     ne   = len(elemTags)          # nombre d'éléments
     ngp  = len(w)                 # nombre de points de Gauss par élément
     nloc = int(len(conn) // ne)   # nombre de nœuds locaux par élément (3 pour P1)
     nn   = int(np.max(tag_to_dof) + 1)  # nombre total de DDLs
 
-    # --- Mise en forme des tableaux Gmsh ---
-    # Gmsh renvoie tout aplati ; on remet en forme (ne, ngp, ...) pour indexer proprement.
+    # Mise en forme des tableaux Gmsh
+    # Gmsh renvoie tout aplati ; on remet en forme (ne, ngp, ...) pour indexer proprement
     det   = np.asarray(det,   dtype=np.float64).reshape(ne, ngp)
     xphys = np.asarray(xphys, dtype=np.float64).reshape(ne, ngp, 3)
     jac   = np.asarray(jac,   dtype=np.float64).reshape(ne, ngp, 3, 3)
@@ -64,13 +61,11 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
     N     = np.asarray(N,     dtype=np.float64).reshape(ngp, nloc)
     gN    = np.asarray(gN,    dtype=np.float64).reshape(ngp, nloc, 3)
 
-    # --- Initialisation de K et F globaux ---
+    # Initialisation de K et F globaux
     K = lil_matrix((nn, nn), dtype=np.float64)
     F = np.zeros(nn, dtype=np.float64)
 
-    # =========================================================================
     # Boucle d'assemblage : on parcourt chaque élément puis chaque point de Gauss
-    # =========================================================================
     for e in range(ne):
 
         # Indices globaux (compacts) des DDLs de l'élément e
@@ -99,9 +94,7 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
             kappa_g = float(kappa_fun(u_g, xg))
             f_g     = float(rhs_fun(xg))
 
-            # -----------------------------------------------------------------
             # Contribution de ce point de Gauss aux intégrales globales
-            # -----------------------------------------------------------------
             for a in range(nloc):
 
                 Ia = int(dof_indices[a])   # indice global du DDL local a
