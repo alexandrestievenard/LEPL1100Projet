@@ -38,9 +38,6 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
 
     L'intérêt est de ne pas recalculer les inversions de jacobiens et les
     gradients physiques à chaque itération Newton de chaque pas de temps.
-    Ces opérations sont coûteuses (np.linalg.inv sur ne*ngp matrices 3*3)
-    et leur résultat est identique à chaque appel puisqu'il ne dépend que
-    de la géométrie du maillage, qui est fixe.
 
     Paramètres
     ----------
@@ -60,12 +57,10 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
     data : dict contenant toutes les données pré-calculées
     """
 
-    # --- Dimensions ---
     ne  = len(elemTags)
     ngp = len(w)
 
-    # --- Mise en forme de la connectivité ---
-    # Gmsh peut renvoyer la connectivité aplatie (ne*nloc,) ou déjà en (ne, nloc).
+    # Gmsh peut renvoyer la connectivité aplatie (ne*nloc,) ou déjà en (ne, nloc)
     conn = np.asarray(conn, dtype=np.int64)
     if conn.ndim == 1:
         nloc = conn.size // ne
@@ -73,7 +68,6 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
     else:
         nloc = conn.shape[1]
 
-    # --- Mise en forme des autres tableaux Gmsh ---
     det   = np.asarray(det,   dtype=np.float64).reshape(ne, ngp)
     xphys = np.asarray(xphys, dtype=np.float64).reshape(ne, ngp, 3)
     jac   = np.asarray(jac,   dtype=np.float64).reshape(ne, ngp, 3, 3)
@@ -81,32 +75,25 @@ def preprocess_newton_data(elemTags, conn, jac, det, xphys, w, N, gN, tag_to_dof
     gN    = np.asarray(gN,    dtype=np.float64).reshape(ngp, nloc, 3)
     w     = np.asarray(w,     dtype=np.float64)
 
-    # --- Conversion tags → indices DDL compacts ---
     # dof_indices[e, a] = indice global du DDL local a de l'élément e
     dof_indices = tag_to_dof[conn]   # shape (ne, nloc)
 
-    # --- Restriction de K_nodal aux éléments ---
-    # K_elem[e, a] = valeur de K au nœud local a de l'élément e.
-    # Cela permet d'interpoler K au point de Gauss par K_g = Σ_a K_elem[e,a]·N[g,a],
-    # exactement comme on interpole u_h. On évite ainsi d'appeler une fonction
-    # K(x) à chaque point de Gauss (ce qui serait plus lent).
+    # K_elem[e, a] = valeur de K au nœud local a de l'élément e
+    # Permet d'interpoler K au point de Gauss : K_g = Σ_a K_elem[e,a]·N[g,a]
     K_elem = K_nodal[dof_indices] if K_nodal is not None else None
 
-    # --- Inversion des jacobiens (une seule fois) ---
-    # invjac[e, g] = J^{-1} au point de Gauss g de l'élément e.
-    # Servira à calculer les gradients physiques : ∇_x N = J^{-T} ∇_ξ N.
+    # invjac[e, g] = J^{-1} au point de Gauss g de l'élément e
+    # Sert à calculer les gradients physiques : ∇_x N = J^{-T} ∇_ξ N
     invjac = np.linalg.inv(jac)   # shape (ne, ngp, 3, 3)
 
-    # --- Gradients physiques des fonctions de forme (une seule fois) ---
-    # gradN_phys[e, g, a, :] = ∇_x N_a au point de Gauss g de l'élément e.
-    # Ces gradients ne dépendent que de la géométrie → calculés une seule fois.
+    # gradN_phys[e, g, a, :] = ∇_x N_a au point de Gauss g de l'élément e
     gradN_phys = np.zeros((ne, ngp, nloc, 3), dtype=np.float64)
     for e in range(ne):
         for g in range(ngp):
             for a in range(nloc):
                 gradN_phys[e, g, a, :] = invjac[e, g] @ gN[g, a]
 
-    nn = int(np.max(dof_indices) + 1)   # nombre total de DDLs
+    nn = int(np.max(dof_indices) + 1)
 
     return {
         "ne": ne, "ngp": ngp, "nloc": nloc, "nn": nn,
@@ -130,8 +117,7 @@ def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichl
     R2 (diffusion)       : R2_a = ∫ κ(u,x) ∇u · ∇Na dΩ
     R3 (réaction)        : R3_a = ∫ r·u·(1 - u/K) · Na dΩ
 
-    Aux DDLs de Dirichlet, on remplace R_i par (U_i - U_D_i)
-    pour forcer la solution à respecter la valeur imposée.
+    Aux DDLs de Dirichlet, on remplace R_i par (U_i - U_D_i).
 
     Paramètres
     ----------
@@ -150,8 +136,8 @@ def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichl
     R : vecteur résidu (nn,)
     """
 
-    ne  = newton_data["ne"]
-    ngp = newton_data["ngp"]
+    ne   = newton_data["ne"]
+    ngp  = newton_data["ngp"]
     nloc = newton_data["nloc"]
     nn   = newton_data["nn"]
 
@@ -166,27 +152,23 @@ def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichl
     if K_elem is None:
         raise ValueError("K_elem manquant dans newton_data. Fournir K_nodal à preprocess_newton_data.")
 
-    # R1 : terme temporel — simple produit matrice-vecteur sparse
     R1 = (M @ (U - U_old)) / dt
     R2 = np.zeros(nn)
     R3 = np.zeros(nn)
 
     for e in range(ne):
-        idx = dof_indices[e]   # indices globaux des DDLs de l'élément e
-        Ue  = U[idx]           # valeurs nodales de u^{n+1} sur l'élément e
+        idx = dof_indices[e]
+        Ue  = U[idx]
 
         for g in range(ngp):
             xg   = xphys[e, g]
             wg   = w[g]
             detg = det[e, g]
 
-            # Reconstruction de u_h et ∇u_h au point de Gauss
-            # u_h = Σ_b U_b · N_b(ξ_g)  et  ∇u_h = Σ_b U_b · ∇_x N_b
+            # u_h = Σ_b U_b · N_b(ξ_g)  ;  ∇u_h = Σ_b U_b · ∇_x N_b
             u_g      = float(np.dot(Ue, N[g, :]))
             grad_u_g = np.einsum('b,bd->d', Ue, gradN_phys[e, g])
 
-            # Reconstruction de K_g au point de Gauss par interpolation
-            # K n'est pas une fonction analytique mais un champ nodal :
             # K_g = Σ_b K_elem[e,b] · N_b(ξ_g)
             K_g = float(np.dot(K_elem[e], N[g, :]))
 
@@ -197,44 +179,37 @@ def assemble_residual(U, U_old, M, dt, newton_data, kappa_fun, r_growth, dirichl
                 Na     = N[g, a]
                 gradNa = gradN_phys[e, g, a]
 
-                # R2 : contribution de la diffusion au résidu
                 # R2_a += w_g · |det J| · κ(u,x) · (∇u · ∇Na)
                 R2[Ia] += wg * detg * kappa_g * np.dot(grad_u_g, gradNa)
 
-                # R3 : contribution de la réaction au résidu
                 # R3_a += w_g · |det J| · r·u·(1 - u/K) · Na
                 R3[Ia] += wg * detg * r_growth * u_g * (1.0 - u_g / K_g) * Na
 
     R = R1 + R2 - R3
 
-    # Conditions de Dirichlet : on remplace R_i par (U_i - U_D_i)
-    # Ainsi Newton cherchera U_i = U_D_i à convergence.
+    # Dirichlet : on remplace R_i par (U_i - U_D_i) pour que Newton converge vers U_D_i
     if dirichlet_dofs is not None and dirichlet_vals is not None:
         R[dirichlet_dofs] = U[dirichlet_dofs] - dirichlet_vals
 
     return R
 
+
 def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dirichlet_dofs=None):
     """
     Calcule la jacobienne J(U) = ∂R/∂U du résidu.
 
-    Newton résout J(Uᵏ)·δU = -R(Uᵏ). Pour cela il faut J, la matrice des
-    dérivées partielles de R par rapport aux inconnues nodales.
-
         J = J1 + J2 - J3
 
-    J1 (terme temporel)  : J1 = M/Δt  (immédiat, R1 est linéaire en U)
+    J1 (terme temporel)  : J1 = M/Δt
 
-    J2 (diffusion)       : deux contributions car κ dépend de u :
+    J2 (diffusion)       : deux contributions (κ dépend de u) :
         J2[a,b] = ∫ κ(u,x)·∇Nb·∇Na dΩ          (variation de ∇u)
                 + ∫ (∂κ/∂u)·Nb·(∇u·∇Na) dΩ     (variation de κ(u))
 
     J3 (réaction)        : f'(u) = r·(1 - 2u/K)
         J3[a,b] = ∫ f'(u)·Nb·Na dΩ
 
-    Pour les DDLs de Dirichlet, on impose J_ii = 1, J_ij = 0 (i≠j)
-    ET on annule la colonne i dans les autres lignes, pour que la
-    correction δU_i soit nulle (la valeur est déjà imposée dans R).
+    Pour les DDLs de Dirichlet : J_ii = 1, J_ij = 0 (i≠j), colonne i annulée.
 
     Paramètres
     ----------
@@ -249,7 +224,7 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
 
     Retour
     ------
-    J : jacobienne globale (sparse CSR, nn * nn)
+    J : jacobienne globale (sparse CSR, nn × nn)
     """
 
     ne   = newton_data["ne"]
@@ -268,7 +243,6 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
     if K_elem is None:
         raise ValueError("K_elem manquant dans newton_data. Fournir K_nodal à preprocess_newton_data.")
 
-    # J1 est immédiat : R1 = (M/dt)(U - U_old) est linéaire en U
     J1 = (M / dt).tolil()
     J2 = lil_matrix((nn, nn), dtype=np.float64)
     J3 = lil_matrix((nn, nn), dtype=np.float64)
@@ -289,9 +263,7 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
             kappa_g  = float(kappa_fun(u_g, xg))
             dkappa_g = float(dkappa_du(u_g, xg))
 
-            # Dérivée de f(u) = r·u·(1 - u/K) par rapport à u :
-            # f'(u) = r·(1 - 2u/K)
-            # Note : le facteur 2 vient du terme en u² lors de la dérivation.
+            # f'(u) = r·(1 - 2u/K)  [dérivée de f(u) = r·u·(1 - u/K)]
             df_du = r_growth * (1.0 - 2.0 * u_g / K_g)
 
             for b in range(nloc):
@@ -304,29 +276,19 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
                     Ia     = int(idx[a])
                     gradNa = gradN_phys[e, g, a]
 
-                    # J2 : jacobienne de la diffusion — deux termes (règle du produit)
-                    #
-                    # 1er terme : variation de ∇u quand U_b change
-                    #   ∂/∂U_b [κ(u) ∇u · ∇Na] = κ(u) · ∇Nb · ∇Na
-                    term_grad = kappa_g * np.dot(gradNb, gradNa)
-
-                    # 2e terme : variation de κ(u) quand U_b change (car κ dépend de u)
-                    #   ∂κ/∂u · (∂u/∂U_b) · (∇u · ∇Na) = (∂κ/∂u) · Nb · (∇u · ∇Na)
+                    # J2 : règle du produit sur κ(u)·∇u·∇Na
+                    # variation de ∇u  : κ(u) · ∇Nb · ∇Na
+                    # variation de κ(u): (∂κ/∂u) · Nb · (∇u · ∇Na)
+                    term_grad  = kappa_g  * np.dot(gradNb, gradNa)
                     term_kappa = dkappa_g * Nb * np.dot(grad_u_g, gradNa)
-
                     J2[Ia, Ib] += (term_grad + term_kappa) * wg * detg
 
-                    # J3 : jacobienne de la réaction
-                    # ∂/∂U_b [f(u)·Na] = f'(u)·Nb·Na
+                    # J3 : ∂/∂U_b [f(u)·Na] = f'(u)·Nb·Na
                     J3[Ia, Ib] += df_du * Nb * Na * wg * detg
 
     J = (J1 + J2 - J3).tolil()
 
-    #Conditions de Dirichlet dans la jacobienne
-    # Pour chaque DDL imposé i :
-    #   - ligne i → identité : [0 ... 1 ... 0]  (δU_i = -R_i/1 = 0 car R_i=U_i-U_D_i)
-    #   - colonne i → zéro dans toutes les autres lignes
-    #     (sinon le DDL imposé "polluerait" les équations des DDLs libres voisins)
+    # Dirichlet : ligne i → identité, colonne i → zéro dans les lignes libres
     if dirichlet_dofs is not None:
         dir_set = set(int(i) for i in dirichlet_dofs)
 
@@ -344,24 +306,17 @@ def assemble_jacobian(U, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dir
 
     return J.tocsr()
 
+
 def newton_solver(U_init, U_old, M, dt, newton_data, kappa_fun, dkappa_du, r_growth, dirichlet_dofs=None, dirichlet_vals=None, tol=1e-5, max_iter=20):
     """
     Résout R(U^{n+1}) = 0 par la méthode de Newton-Raphson.
 
-    À chaque itération k, on linéarise R autour de Uᵏ :
-        R(U^{k+1}) ≈ R(Uᵏ) + J(Uᵏ)·δU = 0
-    ce qui donne le système linéaire à résoudre :
-        J(Uᵏ)·δU = -R(Uᵏ)
-    puis la mise à jour :
-        U^{k+1} = Uᵏ + δU
-
-    Newton converge quadratiquement près de la solution : si ‖δU‖ ≈ ε,
-    l'itération suivante donne ‖δU‖ ≈ ε². C'est bien plus rapide que
-    les méthodes du premier ordre (Picard, point fixe).
+    À chaque itération k :
+        J(Uᵏ)·δU = -R(Uᵏ)    →    U^{k+1} = Uᵏ + δU
 
     Deux critères d'arrêt :
-      - ‖R(Uᵏ)‖ < tol  : le résidu est négligeable (critère physique)
-      - ‖δU‖ < tol      : la correction est négligeable (critère numérique)
+      - ‖R(Uᵏ)‖ < tol  : résidu négligeable
+      - ‖δU‖ < tol      : correction négligeable
 
     Paramètres
     ----------
@@ -383,22 +338,19 @@ def newton_solver(U_init, U_old, M, dt, newton_data, kappa_fun, dkappa_du, r_gro
     U : solution convergée u^{n+1}
     """
 
-    U = U_init.copy()   # on ne modifie pas U_init directement
+    U = U_init.copy()
 
     for k in range(max_iter):
 
-        # Assemblage du résidu à l'itération courante
         R = assemble_residual(
             U, U_old, M, dt,
             newton_data, kappa_fun, r_growth,
             dirichlet_dofs, dirichlet_vals
         )
 
-        # Critère d'arrêt sur le résidu
         if np.linalg.norm(R) < tol:
             break
 
-        # Assemblage de la jacobienne à l'itération courante
         J = assemble_jacobian(
             U, M, dt,
             newton_data, kappa_fun, dkappa_du, r_growth,
@@ -408,10 +360,8 @@ def newton_solver(U_init, U_old, M, dt, newton_data, kappa_fun, dkappa_du, r_gro
         # Résolution du système linéaire J·δU = -R
         deltaU = spsolve(J, -R)
 
-        # Mise à jour de la solution
         U += deltaU
 
-        # Critère d'arrêt secondaire : la correction est devenue négligeable
         if np.linalg.norm(deltaU) < tol:
             break
 

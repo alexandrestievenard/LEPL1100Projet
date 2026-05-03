@@ -1,4 +1,3 @@
-
 # Assemblage de la matrice de rigidité K et du vecteur de charge F pour
 # l'équation de diffusion avec diffusivité non linéaire :
 #
@@ -46,13 +45,11 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
     F : ndarray   (nn,)      — vecteur de charge
     """
 
-    #Dimensions du problème
-    ne   = len(elemTags)          # nombre d'éléments
-    ngp  = len(w)                 # nombre de points de Gauss par élément
-    nloc = int(len(conn) // ne)   # nombre de nœuds locaux par élément (3 pour P1)
-    nn   = int(np.max(tag_to_dof) + 1)  # nombre total de DDLs
+    ne   = len(elemTags)
+    ngp  = len(w)
+    nloc = int(len(conn) // ne)
+    nn   = int(np.max(tag_to_dof) + 1)
 
-    # Mise en forme des tableaux Gmsh
     # Gmsh renvoie tout aplati ; on remet en forme (ne, ngp, ...) pour indexer proprement
     det   = np.asarray(det,   dtype=np.float64).reshape(ne, ngp)
     xphys = np.asarray(xphys, dtype=np.float64).reshape(ne, ngp, 3)
@@ -61,59 +58,41 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
     N     = np.asarray(N,     dtype=np.float64).reshape(ngp, nloc)
     gN    = np.asarray(gN,    dtype=np.float64).reshape(ngp, nloc, 3)
 
-    # Initialisation de K et F globaux
     K = lil_matrix((nn, nn), dtype=np.float64)
     F = np.zeros(nn, dtype=np.float64)
 
-    # Boucle d'assemblage : on parcourt chaque élément puis chaque point de Gauss
     for e in range(ne):
 
-        # Indices globaux (compacts) des DDLs de l'élément e
         dof_indices = tag_to_dof[conn[e, :]]
-
-        # Valeurs nodales de u^n restreintes à l'élément e
-        # Ue[a] = valeur de la solution au nœud local a de l'élément e
         Ue = U[dof_indices]
 
         for g in range(ngp):
 
-            xg   = xphys[e, g]   # coordonnées physiques du point de Gauss g
-            wg   = w[g]          # poids de quadrature associé
-            detg = det[e, g]     # |det(J)| pour le changement de variable dΩ = det(J) dξ
+            xg   = xphys[e, g]
+            wg   = w[g]
+            detg = det[e, g]
 
-            # Inversion du jacobien : nécessaire pour passer des gradients
-            # de l'élément de référence aux gradients physiques.
-            # Gmsh donne J tel que dx = J dξ, donc ∇_x N = J^{-T} ∇_ξ N.
+            # Gmsh donne J tel que dx = J dξ, donc ∇_x N = J^{-T} ∇_ξ N
             invjacg = np.linalg.inv(jac[e, g])
 
-            # Reconstruction de u_h au point de Gauss par interpolation :
             # u_h(ξ_g) = Σ_a U_a^e · N_a(ξ_g)
-            u_g = float(np.dot(Ue, N[g, :]))
-
-            # Évaluation de κ et f au point de Gauss
+            u_g     = float(np.dot(Ue, N[g, :]))
             kappa_g = float(kappa_fun(u_g, xg))
             f_g     = float(rhs_fun(xg))
 
-            # Contribution de ce point de Gauss aux intégrales globales
             for a in range(nloc):
 
-                Ia = int(dof_indices[a])   # indice global du DDL local a
+                Ia     = int(dof_indices[a])
+                gradNa = invjacg @ gN[g, a]   # ∇_x N_a = J^{-T} ∇_ξ N_a
 
-                # Gradient physique de N_a : ∇_x N_a = J^{-T} ∇_ξ N_a
-                gradNa = invjacg @ gN[g, a]
-
-                # Contribution au vecteur de charge :
-                # F_a += w_g · f(x_g) · N_a(ξ_g) · |det J|
+                # F_a += w_g · f(x_g) · N_a · |det J|
                 F[Ia] += wg * f_g * N[g, a] * detg
 
                 for b in range(nloc):
 
-                    Ib = int(dof_indices[b])   # indice global du DDL local b
-
-                    # Gradient physique de N_b
+                    Ib     = int(dof_indices[b])
                     gradNb = invjacg @ gN[g, b]
 
-                    # Contribution à la matrice de rigidité :
                     # K_ab += w_g · κ(u_h, x_g) · (∇N_a · ∇N_b) · |det J|
                     K[Ia, Ib] += wg * kappa_g * float(np.dot(gradNa, gradNb)) * detg
 
