@@ -34,6 +34,7 @@ import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 from matplotlib.animation import FuncAnimation, PillowWriter
 from scipy.spatial import cKDTree
+import time
 
 from gmsh_utils import (
     gmsh_init, gmsh_finalize, open_2d_mesh,
@@ -712,7 +713,7 @@ def main():
     parser.add_argument("--theta",type=float, default=1.0, help="θ du schéma (1.0=Euler implicite, 0.5=Crank-Nicolson)")
     parser.add_argument("--dt", type=float, default=0.1, help="Pas de temps [années] (défaut : 0.1)")
     parser.add_argument("--nsteps", type=int, default=600, help="Nombre de pas de temps (défaut : 600 → 60 ans)")
-    parser.add_argument("--method",type=str, default="imex", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
+    parser.add_argument("--method",type=str, default="newton", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
     parser.add_argument("--save_every", type=int, default=5, help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
     parser.add_argument("--live", action="store_true", help="Affichage en temps réel pendant le calcul")
     parser.add_argument("--no_visu", action="store_true", help="Ne génère pas de GIF à la fin")
@@ -750,6 +751,8 @@ def main():
     print(f"  DDLs={problem['num_dofs']}  |  stabilité : dt·r={args.dt*R_GROWTH:.2f} < 1 ✓")
     print(f"{'═' * 62}\n")
 
+    t0 = time.perf_counter()
+
     results = run_simulation(
         problem,
         method=args.method,
@@ -760,7 +763,11 @@ def main():
         live=args.live,
     )
 
+    t1 = time.perf_counter()
+    cpu_time = t1 - t0
+
     print(f"\nSimulation terminée.")
+    print(f"  Temps CPU simulation  = {cpu_time:.3f} s")
     print(f"  Snapshots sauvegardés : {len(results['fields'])}")
     print(f"  u_max final           = {results['diagnostics']['u_max'][-1]:.3f} ind/km²")
     print(f"  Fraction envahie      = {results['diagnostics']['invaded_fraction'][-1]:.1%}")
