@@ -51,7 +51,6 @@ def assemble_stiffness_and_rhs(elemTags, conn, jac, det, xphys, w, N, gN, U, kap
             # Reconstruction de u_h au point de Gauss par interpolation 
             u_g = float(np.dot(Ue, N[g, :]))
 
-            # Évaluation de κ et f au point de Gauss
             kappa_g = float(kappa_fun(u_g, xg)) # kappa depend aussi de u_g
             f_g = float(rhs_fun(xg))
 
