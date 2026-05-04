@@ -1,4 +1,5 @@
 # mass.py
+# assemble (une seule fois au début de la simu) la matrice de masse M
 import numpy as np
 from scipy.sparse import lil_matrix
 
@@ -8,7 +9,7 @@ def assemble_mass(elemTags, conn, det, w, N, tag_to_dof):
     Assemble global mass matrix:
         M_ij = sum_e ∫_e N_i N_j dx
 
-    Parameters
+    Parameters    
     ----------
     elemTags : array-like, shape (ne,)
     conn     : flattened connectivity (ne*nloc)

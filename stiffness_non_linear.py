@@ -1,3 +1,6 @@
+# fichier qui sert a assembler la matrice de rigidité K et le vecteur de charge F
+#non linéaire, à chaque pas de temps 
+
 import numpy as np
 from scipy.sparse import lil_matrix
 

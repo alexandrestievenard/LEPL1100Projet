@@ -3,26 +3,34 @@
 import gmsh
 from corse_coords import CORSE_XY
 
+#initialisation
 gmsh.initialize()
 gmsh.model.add("corse_frelon_asiatique")
 
+#definition des tailles de maille (plus fin près des frontieres et montagnes)
 CL_OUTER    = 6.0 
 CL_MTN      = 2.0
 CL_BOUNDARY = 2.0 
 CL_INTERIOR = 6.0  
 
 def make_polygon_loop(xy, cl):
-
+    """ prends une liste de points (x,y) et une taille de maille, crée tous les points gmsh.
+    Crée toutes les lignes qui relient ces points (en boucle fermée grâce au modulo) et
+    Crée une CurveLoop (boucle fermée) qui sera utilisée plus tard pour définir une surface
+    
+    -> fct utilitaire pour créer des polygones (ex montagnes)"""
     pt_tags = [gmsh.model.occ.addPoint(x, y, 0, cl) for x, y in xy]
     line_tags = [gmsh.model.occ.addLine(pt_tags[i], pt_tags[(i + 1) % len(pt_tags)]) for i in range(len(pt_tags))]
     loop = gmsh.model.occ.addCurveLoop(line_tags)
     return pt_tags, line_tags, loop
 
+#création du contour de la corse
 outer_pt_tags = [gmsh.model.occ.addPoint(x, y, 0, CL_OUTER) for x, y in CORSE_XY]
 n_outer = len(outer_pt_tags)
 outer_line_tags = [gmsh.model.occ.addLine(outer_pt_tags[i], outer_pt_tags[(i + 1) % n_outer]) for i in range(n_outer)]
 outer_loop = gmsh.model.occ.addCurveLoop(outer_line_tags)
 
+# montagnes
 mtn_cinto_xy = [
     (31.0, 120.0), (31.5, 121.5), (33.0, 122.5), (35.0, 125.0),
     (35.5, 127.5), (37.0, 128.2), (39.0, 128.8), (40.5, 128.9),
@@ -80,57 +88,60 @@ mtn_incudine_xy = [
     (60.5, 64.7), (61.0, 66.5), (60.0, 66.3), (58.0, 64.5),
     (56.2, 62.0), (54.5, 60.5), (52.5, 58.0),
 ]
-
+#on transforme chaque montagen en boucle fermée
 mtn_cinto_pt,mtn_cinto_ln,mtn_cinto_loop=make_polygon_loop(mtn_cinto_xy,CL_MTN)
 mtn_rotondo_pt,mtn_rotondo_ln,mtn_rotondo_loop=make_polygon_loop(mtn_rotondo_xy,CL_MTN)
 mtn_doro_pt,mtn_doro_ln,mtn_doro_loop=make_polygon_loop(mtn_doro_xy,CL_MTN)
 mtn_renoso_pt,mtn_renoso_ln,mtn_renoso_loop=make_polygon_loop(mtn_renoso_xy,CL_MTN)
 mtn_incudine_pt,mtn_incudine_ln,mtn_incudine_loop=make_polygon_loop(mtn_incudine_xy,CL_MTN)
 
-final_surf_tag = gmsh.model.occ.addPlaneSurface([
-    outer_loop,
-    mtn_cinto_loop,
+final_surf_tag = gmsh.model.occ.addPlaneSurface([  #crée une surface plane finale
+    outer_loop,  # surface extérieure
+    mtn_cinto_loop,  # le reste sont des trous
     mtn_rotondo_loop,
     mtn_doro_loop,
     mtn_renoso_loop,
     mtn_incudine_loop,
 ])
 
-gmsh.model.occ.synchronize()
+gmsh.model.occ.synchronize() #prendre en compte toutes les géométries créées
 
 mtn_curves = (mtn_cinto_ln + mtn_rotondo_ln + mtn_doro_ln + mtn_renoso_ln + mtn_incudine_ln)
 
+# creation de groupes només
 gmsh.model.addPhysicalGroup(2, [final_surf_tag], tag=1)
-gmsh.model.setPhysicalName(2, 1, "Domain")
+gmsh.model.setPhysicalName(2, 1, "Domain")  #ile
 
 gmsh.model.addPhysicalGroup(1, outer_line_tags, tag=10)
-gmsh.model.setPhysicalName(1, 10, "OuterBoundary")
+gmsh.model.setPhysicalName(1, 10, "OuterBoundary")  #cote
 
 gmsh.model.addPhysicalGroup(1, mtn_curves, tag=12)
-gmsh.model.setPhysicalName(1, 12, "Mountains")
+gmsh.model.setPhysicalName(1, 12, "Mountains")  #massifs
 
-gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 1.5)   
-gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 7.0)
-gmsh.option.setNumber("Mesh.Algorithm", 6)                   
+#maillage + fin près des côtes et montagnes 
+gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 1.5)   # taille min des éléments
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 7.0)  # taille max
+gmsh.option.setNumber("Mesh.Algorithm", 6)                     #compromis standard qualité/vitesse
+  
+gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)  # désactive le raffinememtn automatique près du bord
+gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)  #ignore la taille spécifiée aux pts individuels
+gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 1)  # garde le raffinement basé sur la courbure
 
-gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 1)
+f_dist = gmsh.model.mesh.field.add("Distance")  # crée le champ distance
+gmsh.model.mesh.field.setNumbers(f_dist, "CurvesList", outer_line_tags)  #calcule, pour chaque point du maillage, la distance à la côte
 
-f_dist = gmsh.model.mesh.field.add("Distance")
-gmsh.model.mesh.field.setNumbers(f_dist, "CurvesList", outer_line_tags)
+f_thresh = gmsh.model.mesh.field.add("Threshold")  # crée un champ threshold qui va transformer la distance en taille d'éléments
+gmsh.model.mesh.field.setNumber(f_thresh, "InField", f_dist)
+gmsh.model.mesh.field.setNumber(f_thresh, "SizeMin", CL_BOUNDARY)  #Si distance à la côte ≤ 0 km : taille = SizeMin = 2.0 km
+gmsh.model.mesh.field.setNumber(f_thresh, "SizeMax", CL_INTERIOR)  #Si distance à la côte ≥ 15 km : taille = SizeMax = 6.0 km
+gmsh.model.mesh.field.setNumber(f_thresh, "DistMin", 0.0)
+gmsh.model.mesh.field.setNumber(f_thresh, "DistMax", 15.0) 
 
-f_thresh = gmsh.model.mesh.field.add("Threshold")
-gmsh.model.mesh.field.setNumber(f_thresh, "InField",  f_dist)
-gmsh.model.mesh.field.setNumber(f_thresh, "SizeMin",  CL_BOUNDARY)
-gmsh.model.mesh.field.setNumber(f_thresh, "SizeMax",  CL_INTERIOR)
-gmsh.model.mesh.field.setNumber(f_thresh, "DistMin",  0.0)
-gmsh.model.mesh.field.setNumber(f_thresh, "DistMax",  15.0)
+gmsh.model.mesh.field.setAsBackgroundMesh(f_thresh)  # règle principale 
 
-gmsh.model.mesh.field.setAsBackgroundMesh(f_thresh)
-
+#génération et sauvegarde
 gmsh.model.mesh.generate(2)
-gmsh.model.mesh.optimize("Netgen")
+gmsh.model.mesh.optimize("Netgen")  #ameliorer la qualité
 gmsh.write("invasion_map.msh")
 
 print("✓ Maillage généré : invasion_map.msh")

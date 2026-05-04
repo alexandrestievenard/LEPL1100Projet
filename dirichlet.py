@@ -1,4 +1,6 @@
 # dirichlet.py
+#fichier qui gère l'imposition des conditions de Dirichlet -> u = 0 sur la côte
+
 import numpy as np
 from scipy.sparse.linalg import spsolve
 from scipy.linalg import det
@@ -33,6 +35,7 @@ def apply_dirichlet_by_reduction(K, F, dirichlet_dofs, dirichlet_values):
 
 
 def solve_dirichlet(K, F, dirichlet_dofs, dirichlet_values):
+    """ Solve K u = F with strong Dirichlet conditions by reduction."""
     K_red, F_red, free_dofs, U_full = apply_dirichlet_by_reduction(
         K, F, dirichlet_dofs, dirichlet_values
     )
