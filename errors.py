@@ -1,4 +1,5 @@
 # errors.py
+# sert à la validation et la mesure de précision du solveur éléemnts finis
 import numpy as np
 import gmsh
 
@@ -83,7 +84,7 @@ def compute_L2_H1_errors(
     gN = np.asarray(gN, dtype=float).reshape(ngp, nloc, 3)
 
     # pick gradient function
-    if grad_exact is None:
+    if grad_exact is None:  
         def grad_fun(x):
             return _numeric_grad_3d(u_exact, x, eps=eps_grad)
     else:
