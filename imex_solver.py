@@ -1,35 +1,9 @@
-# =============================================================================
-# imex_solver.py — Un pas de temps IMEX pour l'équation de Fisher-KPP
-# =============================================================================
-#
-# L'équation à résoudre est :
-#
-#   ∂u/∂t - ∇·(κ(u,x)∇u) = r·u·(1 - u/K(x))
-#     terme de diffusion       terme de réaction
-#
-# POURQUOI LE SCHÉMA IMEX ?
-# --------------------------
-# On a deux termes de natures mathématiques opposées :
-#
-#   Diffusion : opérateur LINÉAIRE en u, mais RAIDE.
-#     → Traitement explicite interdit : imposerait Δt < h²/(2κ) ≈ 0.23 an.
-#     → Doit être traité IMPLICITEMENT pour la stabilité.
-#
-#   Réaction  : terme NON LINÉAIRE (contient u²), mais DOUX (varie lentement).
-#     → Traitement implicite forcerait à résoudre un système non linéaire.
-#     → Peut être traité EXPLICITEMENT sans risque d'instabilité si Δt·r < 1.
-#
-# Le schéma IMEX traite chaque terme selon sa nature :
-#
-#   (M + Δt·K(uⁿ)) · u^{n+1} = M·uⁿ + Δt · r·uⁿ·(1 - uⁿ/K) · M_lump
-#    \_______diffusion implicite_/   \________réaction explicite_________/
-#
-# K(uⁿ) est la matrice de rigidité assemblée avec κ évalué en uⁿ (connu).
-# Le système reste donc LINÉAIRE en u^{n+1} → résolution directe possible.
-#
-# CONDITION DE STABILITÉ pour la réaction explicite : Δt · r < 1
-# Avec r = 1.0 an⁻¹ et Δt = 0.1 an : 0.1 < 1 ✓
-# =============================================================================
+# imex_solver.py
+# solveur imex - fait avancer la solution en temps pas à pas 
+# diffusion est traitée implicitement et la réaction (terme logistque de croissance ) est traitée explicitement
+# Equation globale : du/dt - div (kappa(u,x) grad(u)) = ru (1 - u/K(x))
+# Schéma IMEX associé : (M + delta(t) K(u^n,x)) . u^(n+1) = Mu^n + delta(t) ru^n (1 - u^n/K) . M_lump
+# theta-step : (M + theta delta(t) K) u^(n+1) = (M - (1-theta) delta(t) K) u^n + delta(t) F_total
 
 import numpy as np
 from stiffness_non_linear import assemble_stiffness_and_rhs
@@ -42,30 +16,27 @@ def imex_step(U_old, problem, dt, theta=1.0):
 
     Paramètres
     ----------
-    U_old   : solution nodale à l'instant tⁿ (num_dofs,)
+    U_old   : solution nodale à l'instant t^n
     problem : dictionnaire renvoyé par build_problem()
     dt      : pas de temps [années]
     theta   : paramètre du schéma theta
-              1.0 → Euler implicite (stable, ordre 1)
-              0.5 → Crank-Nicolson  (stable, ordre 2)
+              1.0 : Euler implicite (stable, ordre 1)
+              0.5 : Crank-Nicolson  (stable, ordre 2)
 
-    Retour
+    Return
     ------
-    U_new : solution nodale à l'instant t^{n+1} (num_dofs,)
+    U_new : solution nodale à l'instant t^(n+1)
     """
 
-    M        = problem["M"]          
-    M_lump   = problem["M_lump"]     
-    K_nodal  = problem["K_nodal"]    
-    R_GROWTH = problem["R_GROWTH"]   
-    dir_dofs = problem["dir_dofs"]   
-    dir_vals = problem["dir_vals"]   
+    # Lecture des données nécessaires depuis le dictionnaire du problème
+    M = problem["M"]          # matrice de masse (assemblée une seule fois)
+    M_lump = problem["M_lump"]     # masse lumpée pour la réaction (vecteur)
+    K_nodal = problem["K_nodal"]    # capacité de charge locale aux nœuds [ind/km²]
+    R_GROWTH = problem["R_GROWTH"]   # taux de croissance r [an⁻¹]
+    dir_dofs = problem["dir_dofs"]   # indices des DDLs de Dirichlet (bord de mer)
+    dir_vals = problem["dir_vals"]   # valeurs imposées (u = 0 sur la côte)
 
-    # =========================================================================
-    # ÉTAPE 1 : Matrice de rigidité K avec κ(uⁿ, x)
-    # =========================================================================
-    # κ est évalué en uⁿ, ce qui maintient K linéaire en u^{n+1}.
-    # Terme source nul (0.0) car la réaction logistique est gérée séparément.
+    # assemblage du terme de diffusion (implicite)
     K_lil, F0 = assemble_stiffness_and_rhs(
         problem["elemTags"],
         problem["elemNodeTags"],
@@ -75,24 +46,19 @@ def imex_step(U_old, problem, dt, theta=1.0):
         problem["w"],
         problem["N"],
         problem["gN"],
-        U_old,
+        U_old,  # kappa est évalué avec u^n
         problem["kappa_fun"],
         lambda x: 0.0,
         problem["tag_to_dof"]
     )
     K_mat = K_lil.tocsr()
 
-    # f(uⁿ) = r · uⁿ · (1 - uⁿ/K(x))
-    # L'utilisation de la masse lumpée (M_lump) évite un produit matrice-vecteur complet M·f.
-    # Le garde-fou max(U_old, 0) évite une croissance artificielle sur des artefacts négatifs.
+    # terme de réaction explicite
     U_pos   = np.maximum(U_old, 0.0)
     f_react = R_GROWTH * U_pos * (1.0 - U_pos / K_nodal)
-
-    # Second membre total = contribution diffusion (F0) + réaction
     F_total = F0 + f_react * M_lump
 
-    # Résout : (M + θ·Δt·K)·u^{n+1} = (M - (1-θ)·Δt·K)·uⁿ + Δt·F
-    # F_total est passé pour F_n et F_{n+1} car la réaction est 100% évaluée en uⁿ.
+    #theta step
     U_new = theta_step(
         M, K_mat,
         F_total, F_total,
@@ -103,8 +69,7 @@ def imex_step(U_old, problem, dt, theta=1.0):
         dir_vals_np1=dir_vals
     )
 
-    # garde-fous physiques
-    U_new = np.maximum(U_new, 0.0)
-    U_new[dir_dofs] = dir_vals
+    U_new = np.maximum(U_new, 0.0)  #u>=0, densité ne peut pas etre -
+    U_new[dir_dofs] = dir_vals  #u = 0 sur la côte
 
     return U_new
