@@ -1,17 +1,3 @@
-# =============================================================================
-# comparison.py — Étude de convergence IMEX vs Newton-Raphson
-# =============================================================================
-#
-# Ce fichier vérifie les deux solveurs temporels sur un cas test simple.
-# On utilise la méthode des solutions manufacturées : une solution exacte est
-# choisie a priori, puis le terme source est construit pour qu'elle vérifie
-# exactement l'équation.
-#
-# OBJECTIF :
-#   - comparer l'erreur L2 finale pour plusieurs pas de temps Δt
-#   - vérifier l'ordre de convergence temporel
-#   - comparer le coût CPU des solveurs IMEX et Newton-Raphson
-# =============================================================================
 
 import time
 import gmsh
@@ -28,10 +14,6 @@ from mass import assemble_mass
 from stiffness_non_linear import assemble_stiffness_and_rhs
 from dirichlet import theta_step
 
-
-# =============================================================================
-# SECTION 1 — Solution manufacturée
-# =============================================================================
 
 L = 10.0   # côté du carré [km]
 
@@ -80,7 +62,6 @@ def source_exact(xy, t):
     laplacien = -2.0 * a**2 * u
     grad_u_norm2 = grad_u[0]**2 + grad_u[1]**2
 
-    # div(kappa(u) grad u) = kappa Δu + kappa'(u) |grad u|²
     diff_term = kappa * laplacien + dkappa_du * grad_u_norm2
 
     du_dt = -u
@@ -91,10 +72,6 @@ def source_exact(xy, t):
 
     return du_dt - diff_term - reaction
 
-
-# =============================================================================
-# SECTION 2 — Maillage carré
-# =============================================================================
 
 def generate_square_mesh(Lx=10.0, Ly=10.0, h=0.5, order=1, filename="square.msh"):
     """
@@ -138,10 +115,6 @@ def generate_square_mesh(Lx=10.0, Ly=10.0, h=0.5, order=1, filename="square.msh"
     return filename
 
 
-# =============================================================================
-# SECTION 3 — Construction du problème test
-# =============================================================================
-
 def build_test_problem(msh_file, order=1, K_const=50.0):
     """
     Prépare les données FEM nécessaires au test de convergence.
@@ -153,7 +126,7 @@ def build_test_problem(msh_file, order=1, K_const=50.0):
     elemType, nodeTags, nodeCoords, elemTags, elemNodeTags, bnds, bnds_tags = \
         open_2d_mesh(msh_file, order)
 
-    # --- Mapping tags Gmsh → indices DDL compacts ---
+    # mapping tags Gmsh -> indices DDL compacts
     unique_dofs_tags = np.unique(elemNodeTags)
     num_dofs = len(unique_dofs_tags)
 
@@ -170,26 +143,26 @@ def build_test_problem(msh_file, order=1, K_const=50.0):
         tag_to_dof[tag_int] = i
         dof_coords[i] = all_coords[tag_to_node_index[tag_int]]
 
-    # --- Quadrature et géométrie ---
+    #Quadrature et géométrie
     xi, w, N, gN = prepare_quadrature_and_basis(elemType, order)
     jac, det, coords = get_jacobians(elemType, xi)
 
-    # --- Condition de Dirichlet homogène sur tout le bord ---
+    #Condition de Dirichlet homogène sur tout le bord
     bnd_names = [name for name, _ in bnds]
     outer_tags = bnds_tags[bnd_names.index("OuterBoundary")]
 
     dir_dofs = border_dofs_from_tags(outer_tags, tag_to_dof).astype(int)
     dir_vals = np.zeros(len(dir_dofs), dtype=float)
 
-    # --- Capacité de charge constante ---
+    #Capacité de charge constante
     K_nodal = K_const * np.ones(num_dofs, dtype=float)
 
-    # --- Matrice de masse ---
+    # Matrice de masse 
     M_lil = assemble_mass(elemTags, elemNodeTags, det, w, N, tag_to_dof)
     M = M_lil.tocsr()
     M_lump = np.array(M.sum(axis=1)).flatten()
 
-    # --- Prétraitement Newton ---
+    # Prétraitement Newton
     from newton_solver import preprocess_newton_data
 
     newton_data = preprocess_newton_data(
@@ -205,7 +178,7 @@ def build_test_problem(msh_file, order=1, K_const=50.0):
         K_nodal=K_nodal
     )
 
-    # --- Condition initiale exacte ---
+    # Condition initiale exacte 
     U0 = np.array([
         u_exact(dof_coords[i, :2], 0.0)
         for i in range(num_dofs)
@@ -260,11 +233,6 @@ def build_test_problem(msh_file, order=1, K_const=50.0):
         "U0": U0,
     }
 
-
-# =============================================================================
-# SECTION 4 — Solveur IMEX avec source manufacturée
-# =============================================================================
-
 def imex_step_with_source(U_old, problem, dt, theta, t):
     """
     Effectue un pas IMEX en ajoutant le terme source manufacturé.
@@ -314,10 +282,6 @@ def imex_step_with_source(U_old, problem, dt, theta, t):
     return U_new
 
 
-# =============================================================================
-# SECTION 5 — Newton avec source manufacturée
-# =============================================================================
-
 def newton_solver_with_source(U_init, U_old, problem, dt, t, tol=1e-8, max_iter=20):
     """
     Résout le pas implicite non linéaire avec Newton-Raphson.
@@ -338,7 +302,7 @@ def newton_solver_with_source(U_init, U_old, problem, dt, t, tol=1e-8, max_iter=
     dkappa_du = problem["dkappa_du"]
     r_growth = problem["R_GROWTH"]
 
-    # --- Assemblage du vecteur source au temps t^{n+1} ---
+    # Assemblage du vecteur source au temps t^{n+1}
     nn = problem["num_dofs"]
     F_source = np.zeros(nn)
 
@@ -412,10 +376,6 @@ def newton_solver_with_source(U_init, U_old, problem, dt, t, tol=1e-8, max_iter=
     return U
 
 
-# =============================================================================
-# SECTION 6 — Boucle temporelle du test
-# =============================================================================
-
 def run_test_simulation(problem, dt, nsteps, method, theta=1.0, save_every=5, print_every=5):
     """
     Lance une simulation complète jusqu'à T_final.
@@ -468,11 +428,8 @@ def run_test_simulation(problem, dt, nsteps, method, theta=1.0, save_every=5, pr
             )
 
     cpu_time = time.perf_counter() - t_start
-    return U, cpu_time, times, errors_L2, errors_H1
+    return U, cpu_time
 
-# =============================================================================
-# SECTION 7 — Calcul d'erreur
-# =============================================================================
 
 def compute_error(problem, U_final, t_final):
     """
@@ -542,11 +499,6 @@ def compute_error(problem, U_final, t_final):
     err_H1 = np.sqrt(err_L2**2 + err_H1_semi**2)
 
     return err_L2, err_H1_semi, err_H1
-
-
-# =============================================================================
-# SECTION 8 — Programme principal
-# =============================================================================
 
 def main():
     order = 1
@@ -638,14 +590,13 @@ def main():
 
         results.append((dt, err_imex[0], cpu_imex, err_newton[0], cpu_newton))
 
-    # --- Récapitulatif ---
     print("\n=== Récapitulatif ===")
     print("dt      | err_imex (L2) | t_imex (s) | err_newton (L2) | t_newton (s)")
 
     for dt, e_im, t_im, e_nw, t_nw in results:
         print(f"{dt:6.4f} | {e_im:.2e}      | {t_im:.3f}      | {e_nw:.2e}        | {t_nw:.3f}")
 
-    # --- Courbes de convergence finales ---
+    #Courbes de convergence
     dt_vals = np.array([r[0] for r in results])
     err_im = np.array([r[1] for r in results])
     err_nw = np.array([r[3] for r in results])
