@@ -416,20 +416,22 @@ def newton_solver_with_source(U_init, U_old, problem, dt, t, tol=1e-8, max_iter=
 # SECTION 6 — Boucle temporelle du test
 # =============================================================================
 
-def run_test_simulation(problem, dt, nsteps, method, theta=1.0):
+def run_test_simulation(problem, dt, nsteps, method, theta=1.0, save_every=5, print_every=5):
     """
     Lance une simulation complète jusqu'à T_final.
 
     Retourne la solution finale et le temps CPU associé.
     """
     U = problem["U0"].copy()
-
     dir_dofs = problem["dir_dofs"]
     dir_vals = problem["dir_vals"]
 
     t_start = time.perf_counter()
 
-    print_every = max(1, nsteps // 5)
+    # Stockage de l'erreur avec le temps
+    times = []
+    errors_L2 = []
+    errors_H1 = []
 
     for step in range(nsteps):
         t = step * dt
@@ -453,6 +455,12 @@ def run_test_simulation(problem, dt, nsteps, method, theta=1.0):
 
         U[dir_dofs] = dir_vals
 
+        if step % save_every == 0:
+            err_L2, _, err_H1 = compute_error(problem, U, t + dt)
+            times.append(t + dt)
+            errors_L2.append(err_L2)
+            errors_H1.append(err_H1)
+
         if step % print_every == 0 or step == nsteps - 1:
             print(
                 f"  t={t+dt:.3f} | max(U)={np.max(U):.4f} "
@@ -460,8 +468,7 @@ def run_test_simulation(problem, dt, nsteps, method, theta=1.0):
             )
 
     cpu_time = time.perf_counter() - t_start
-    return U, cpu_time
-
+    return U, cpu_time, times, errors_L2, errors_H1
 
 # =============================================================================
 # SECTION 7 — Calcul d'erreur
@@ -557,9 +564,44 @@ def main():
     problem = build_test_problem(msh_file, order=order, K_const=50.0)
     print(f"Maillage généré : {problem['num_dofs']} nœuds.")
 
+    # -------------------------------------------------------------------------
+    # 1. Étude de l'erreur en fonction du temps
+    # -------------------------------------------------------------------------
+    dt_single = 0.1
     T_final = 1.0
-    dt_list = [0.05, 0.025, 0.0125, 0.00625]
+    nsteps_single = int(T_final / dt_single)
 
+    print(f"\n=== Évolution temporelle de l'erreur (dt = {dt_single}) ===")
+
+    # IMEX
+    _, _, t_imex, errL2_imex, _ = run_test_simulation(
+        problem, dt_single, nsteps_single,
+        method="imex", theta=1.0,
+        save_every=1, print_every=nsteps_single//4
+    )
+
+    # Newton
+    _, _, t_newton, errL2_newton, _ = run_test_simulation(
+        problem, dt_single, nsteps_single,
+        method="newton",
+        save_every=1, print_every=nsteps_single//4
+    )
+
+    plt.figure()
+    plt.plot(t_imex, errL2_imex, 'o-', label='IMEX (θ=1)')
+    plt.plot(t_newton, errL2_newton, 's-', label='Newton')
+    plt.xlabel('Temps (années)')
+    plt.ylabel('Erreur L2')
+    plt.title(f"Évolution de l'erreur - dt = {dt_single}")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('error_vs_time.png')
+    plt.show()
+
+    # -------------------------------------------------------------------------
+    # 2. Étude de convergence (erreur finale)
+    # -------------------------------------------------------------------------
+    dt_list = [0.05, 0.025, 0.0125, 0.00625]
     results = []
 
     for dt in dt_list:
@@ -567,10 +609,12 @@ def main():
 
         print(f"\n--- dt = {dt} (nsteps={nsteps}) ---")
 
-        U_imex, cpu_imex = run_test_simulation(
+        U_imex, cpu_imex, _, _, _ = run_test_simulation(
             problem, dt, nsteps,
             method="imex",
-            theta=1.0
+            theta=1.0,
+            save_every=5,
+            print_every=max(1, nsteps//5)
         )
         err_imex = compute_error(problem, U_imex, T_final)
 
@@ -579,9 +623,11 @@ def main():
             f"err_L2 = {err_imex[0]:.2e}, err_H1 = {err_imex[2]:.2e}"
         )
 
-        U_newton, cpu_newton = run_test_simulation(
+        U_newton, cpu_newton, _, _, _ = run_test_simulation(
             problem, dt, nsteps,
-            method="newton"
+            method="newton",
+            save_every=5,
+            print_every=max(1, nsteps//5)
         )
         err_newton = compute_error(problem, U_newton, T_final)
 
@@ -599,23 +645,20 @@ def main():
     for dt, e_im, t_im, e_nw, t_nw in results:
         print(f"{dt:6.4f} | {e_im:.2e}      | {t_im:.3f}      | {e_nw:.2e}        | {t_nw:.3f}")
 
-    # --- Courbes de convergence ---
+    # --- Courbes de convergence finales ---
     dt_vals = np.array([r[0] for r in results])
     err_im = np.array([r[1] for r in results])
     err_nw = np.array([r[3] for r in results])
-
     ref = err_im[0] * dt_vals / dt_vals[0]
 
     plt.figure()
     plt.loglog(dt_vals, err_im, "o-", label="IMEX (θ=1)")
     plt.loglog(dt_vals, err_nw, "s-", label="Newton")
     plt.loglog(dt_vals, ref, "k--", label="ordre 1")
-
     plt.xlabel("dt (années)")
     plt.ylabel("Erreur L2 à t=1 an")
     plt.legend()
     plt.grid(True)
-
     plt.savefig("convergence.png")
     plt.show()
 
