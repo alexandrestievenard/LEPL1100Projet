@@ -35,19 +35,26 @@ MTN5_CX, MTN5_CY = 51.2, 50.0
 #centre du bocage
 BOCAGE_CX, BOCAGE_CY = 68.0, 115.0 
 
-#foyer d'invasion initial
-X0, Y0 = 52.0, 25.0
+#foyer d'invasion initial (Basteliccacia en aôut 2024)
+X0, Y0 = 30.0, 54.0
 
-KAPPA_RURAL = 5.0    # diffusivité en campagne [km²/an]
-KAPPA_URBAN = 0.5    # diffusivité en ville [km²/an]
+# Paramètre estimés dans l'article C. Robinet
+KAPPA_RURAL = 984.0    # diffusivité en campagne [km²/an]
+# 10 x plus faible en ville
+KAPPA_URBAN = 98.4    # diffusivité en ville [km²/an]
 
-R_GROWTH = 1.0       # taux de croissance intrinsèque r [an⁻¹]
+R_GROWTH = 1.66       # taux de croissance intrinsèque r [an⁻¹]
 
-K_FOREST = 80.0      # capacité de charge maximale (bocage) [ind/km²]
-K_RURAL  = 50.0      # capacité rurale de base [ind/km²]
-K_URBAN  = 1.5       # capacité urbaine [ind/km²]
+# Conversion nids/km^2 vers individus/km^2
+K_NESTS_ROBINET = 0.06 # capacité du millieu [nids/km^2]
+IND_PER_NEST = 1000    # individus par nid
+K_ROBINET_IND = K_NESTS_ROBINET * IND_PER_NEST  # Cpacité du millieu en individus/km^2
 
-K_COAST    = 10.0    # capacité au contact de la mer [ind/km²]
+K_FOREST = 1.3 * K_ROBINET_IND
+K_RURAL  = 1.0 * K_ROBINET_IND
+K_URBAN  = 0.2 * K_ROBINET_IND
+
+K_COAST    = K_ROBINET_IND / 10    # capacité au contact de la mer [ind/km²]
 COAST_BAND = 0.5     # largeur de la bande côtière défavorable [km]
 
 ALPHA_KAPPA = 0.02   # a forte densité -> competition territoriale kappa(u,x) = kappa_base(x) / (1+ alpha u)
@@ -55,10 +62,11 @@ ALPHA_KAPPA = 0.02   # a forte densité -> competition territoriale kappa(u,x) =
 def kappa_base(x):
     """
     Diffusivité spatiale de base [km²/an], sans dépendance à u.
+
     Profil pour chaque ville :
-      dist < r_hard            -> kappa_urbain = 0.5
-      r_hard ≤ dist < r_soft   -> interpolation linéaire 0.5 → 5.0 
-      dist ≥ r_soft            -> kappa_rural = 5.0 
+      dist < r_hard            -> kappa_urbain = KAPPA_URBAN
+      r_hard ≤ dist < r_soft   -> interpolation linéaire KAPPA_URBAN → KAPPA_RURAL
+      dist ≥ r_soft            -> kappa_rural = KAPPA_RURAL
     """
     kappa_val = KAPPA_RURAL
     for _, cx, cy, r_hard, r_soft in CITIES:
@@ -142,8 +150,10 @@ def build_problem(order=1, msh_filename="invasion_map.msh", gmsh_model_name="inv
         return np.array([], dtype=int)
 
     outer_dofs = get_dofs("OuterBoundary")
-    dir_dofs   = outer_dofs.astype(int)
-    dir_vals   = np.zeros(len(dir_dofs), dtype=float)   # u = 0 sur la côte
+
+    # Neumann homogène naturel : aucun flux sortant.
+    dir_dofs = np.array([], dtype=int)
+    dir_vals = np.array([], dtype=float)
 
     coast_xy = dof_coords[outer_dofs, :2]
     coast_tree = cKDTree(coast_xy)
@@ -188,7 +198,7 @@ def build_problem(order=1, msh_filename="invasion_map.msh", gmsh_model_name="inv
         city_core_masks[name] = dist_city_nodal < r_soft
         
     #intro des frelons par gaussienne 
-    R0, A0 = 5.0, 5.0  
+    R0, A0 = 8.0, 30.0  
     U0 = np.array([
         A0 * math.exp(-((dof_coords[i, 0] - X0)**2 +
                          (dof_coords[i, 1] - Y0)**2) / (2 * R0**2))
@@ -317,7 +327,7 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
             saved_times.append(t + dt)
             saved_fields.append(U.copy())
 
-        n_inv = np.sum(U > 1.0)   # nœuds avec plus d'1 ind/km2 (invasion établie)
+        n_inv = np.sum(U > 0.1 * problem["K_nodal"])   # nœuds avec plus de 10% de la capacité atteinte (invasion établie)
         diagnostics["u_max"].append(np.max(U))
         diagnostics["invaded_fraction"].append(n_inv / num_dofs)
         diagnostics["u_mean_coast"].append(np.mean(U[dist_coast_nodal < 5.0]))
@@ -328,7 +338,7 @@ def run_simulation(problem, method="imex", dt=0.1, nsteps=600,
         if live and step % 3 == 0:
             cb = _update_live_figure(fig, ax, cb, problem, U, t, method)
 
-        # Tous les 30 pas (= toutes les 3 ans avec dt=0.1) pour rester lisible.
+        # Tous les 30 pas pour rester lisible.
         if step % 30 == 0 or step == nsteps - 1:
             city_stats = " | ".join(
                 f"{name}={np.mean(U[mask]):.2f}"
@@ -381,10 +391,10 @@ def add_overlays(ax, t_year):
         ax.plot(cx + r_soft * np.cos(theta_arc),
                 cy + r_soft * np.sin(theta_arc),
                 color=CYAN, lw=0.8, ls='--', zorder=10, alpha=0.6)
-        ax.text(cx, cy, f'{name}\n(K={K_URBAN})',
+        ax.text(cx, cy, f'{name}\n(K={K_URBAN:.0f})',
                 color=CYAN, fontsize=6.8, ha='center', va='center',
                 fontweight='bold', zorder=11, path_effects=halo)
-        ax.text(cx, cy - r_soft - 2.0, 'banlieues (K→50)',
+        ax.text(cx, cy - r_soft - 2.0, f'banlieues (K→{K_RURAL:.0f})',
                 color=CYAN, fontsize=5.5, ha='center',
                 zorder=11, path_effects=halo)
 
@@ -393,7 +403,7 @@ def add_overlays(ax, t_year):
                 fontsize=fs, ha='center', va='center',
                 fontweight='bold', zorder=11, path_effects=halo)
 
-    ax.text(BOCAGE_CX, BOCAGE_CY, 'Bocage\n(K=80)', color=GOLD,
+    ax.text(BOCAGE_CX, BOCAGE_CY, f'Bocage\n(K={K_FOREST:.0f})', color=GOLD,
             fontsize=6.5, ha='center', va='center',
             zorder=11, alpha=0.85, path_effects=halo)
 
@@ -419,14 +429,14 @@ def make_legend(fig, ax, c_star):
         mpatches.Patch(facecolor='white', edgecolor='gray', lw=0.5,
                        label='Massifs : flux = 0'),
         mpatches.Patch(facecolor='black', edgecolor=CYAN, lw=1.5,
-                       label=f'Villes (K={K_URBAN})'),
+                       label=f'Villes (K={K_URBAN:.0f} ind/km²)'),
     ]
     leg = ax.legend(
         handles=patches, loc='lower center', bbox_to_anchor=(0.5, -0.18),
         ncol=3, frameon=True, framealpha=0.85,
         facecolor='#1a1a2e', edgecolor='#444466',
         labelcolor='white', fontsize=7.5,
-        title=f'c* = {c_star:.1f} km/an   |   Modèle Fisher-KPP',
+        title=f'c*_rural,max = {c_star:.1f} km/an   |   Modèle Fisher-KPP',
         title_fontsize=8,
     )
     leg.get_title().set_color('#aaaacc')
@@ -469,7 +479,7 @@ def _update_live_figure(fig, ax, cb, problem, U, t, method):
 
     ax.set_title(
         f'Invasion du Frelon Asiatique — Fisher-KPP (Corse)\n'
-        f't = {t:.1f} an  |  c* = {c_star:.1f} km/an  |  méthode : {method}',
+        f't = {t:.1f} an  |  c*_rural,max = {c_star:.1f} km/an  |  méthode : {method}',
         color='white', fontsize=11, pad=10
     )
     ax.set_xlabel('x [km]', color='#aaaacc')
@@ -534,7 +544,7 @@ def save_results_animation(problem, results, output_file="simulation.gif", strid
 
         ax.set_title(
             f'Invasion du Frelon Asiatique — Fisher-KPP (Corse)\n'
-            f't = {t:.1f} an  |  c* = {c_star:.1f} km/an  |  méthode : {method}',
+            f't = {t:.1f} an  |  c*_rural,max = {c_star:.1f} km/an  |  méthode : {method}',
             color='white', fontsize=11, pad=10
         )
         ax.set_xlabel('x [km]', color='#aaaacc')
@@ -563,9 +573,9 @@ def main():
     parser = argparse.ArgumentParser(description="Fisher-KPP 2D — Invasion du frelon asiatique (Vespa velutina)")
     parser.add_argument("-order", type=int, default=1, help="Ordre polynomial des éléments (défaut : 1)")
     parser.add_argument("--theta",type=float, default=1.0, help="θ du schéma (1.0=Euler implicite, 0.5=Crank-Nicolson)")
-    parser.add_argument("--dt", type=float, default=0.1, help="Pas de temps [années] (défaut : 0.1)")
-    parser.add_argument("--nsteps", type=int, default=600, help="Nombre de pas de temps (défaut : 600 → 60 ans)")
-    parser.add_argument("--method",type=str, default="imex", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
+    parser.add_argument("--dt", type=float, default=0.02, help="Pas de temps [années] (défaut : 0.02)")
+    parser.add_argument("--nsteps", type=int, default=250, help="Nombre de pas de temps (défaut : 250 → 5 ans)")
+    parser.add_argument("--method",type=str, default="newton", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
     parser.add_argument("--save_every", type=int, default=5, help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
     parser.add_argument("--live", action="store_true", help="Affichage en temps réel pendant le calcul")
     parser.add_argument("--no_visu", action="store_true", help="Ne génère pas de GIF à la fin")
@@ -596,8 +606,8 @@ def main():
     print(f"  Villes : {', '.join(name for name, *_ in CITIES)}")
     print(f"  κ(u,x) = κ_base(x) / (1 + {ALPHA_KAPPA}·u)")
     print(f"  κ rural={KAPPA_RURAL} | κ urbain={KAPPA_URBAN} km²/an")
-    print(f"  r={R_GROWTH} an⁻¹  |  c* = {c_star:.2f} km/an")
-    print(f"  K côte={K_COAST} → rural={K_RURAL} → bocage={K_FOREST} ind/km²")
+    print(f"  r={R_GROWTH} an⁻¹  |  c*_rural,max = {c_star:.2f} km/an")
+    print(f"  K côte={K_COAST:.0f} → rural={K_RURAL:.0f} → bocage={K_FOREST:.0f} ind/km²")
     print(f"  méthode : {args.method}  |  θ = {args.theta}")
     print(f"  dt={args.dt} an  |  {args.nsteps} pas  |  T={T_total:.0f} ans")
     print(f"  DDLs={problem['num_dofs']}  |  stabilité : dt·r={args.dt*R_GROWTH:.2f} < 1 ✓")
@@ -620,7 +630,7 @@ def main():
 
     #post-traitement (génération du GIF)
     if not args.no_visu:
-        save_results_animation(problem, results,output_file="simulation.gif", stride=1, fps=10)
+        save_results_animation(problem, results,output_file="simulation_newton.gif", stride=1, fps=10)
 
     gmsh_finalize()
     return problem, results
