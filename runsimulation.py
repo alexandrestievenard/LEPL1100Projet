@@ -567,9 +567,9 @@ def main():
     parser.add_argument("--nsteps", type=int, default=600, help="Nombre de pas de temps (défaut : 600 → 60 ans)")
     parser.add_argument("--method",type=str, default="imex", choices=["imex", "newton"], help="Méthode temporelle (défaut : imex)")
     parser.add_argument("--save_every", type=int, default=5, help="Sauvegarde 1 snapshot tous les N pas (défaut : 5)")
-    parser.add_argument("--live", action="store_true", help="Affichage en temps réel pendant le calcul")
+    parser.add_argument("--no_live",dest="live",action="store_false",default=True,help="Désactive l'affichage en temps réel pendant le calcul")
     parser.add_argument("--no_visu", action="store_true", help="Ne génère pas de GIF à la fin")
-    parser.add_argument("--show_mesh", action="store_true",help="Affiche le maillage de la Corse avant de lancer la simulation")
+    parser.add_argument("--no_mesh",dest="show_mesh",action="store_false",default=True,help="N'affiche pas le maillage de la Corse avant de lancer la simulation")    
     args = parser.parse_args()
 
     problem = build_problem(order=args.order)
@@ -594,13 +594,13 @@ def main():
     print(f"\n{'═' * 62}")
     print("  Fisher-KPP — Vespa velutina (Corse)")
     print(f"  Villes : {', '.join(name for name, *_ in CITIES)}")
-    print(f"  κ(u,x) = κ_base(x) / (1 + {ALPHA_KAPPA}·u)")
-    print(f"  κ rural={KAPPA_RURAL} | κ urbain={KAPPA_URBAN} km²/an")
+    print(f"  kappa(u,x) = kappa_base(x) / (1 + {ALPHA_KAPPA}·u)")
+    print(f"  kappa rural={KAPPA_RURAL} | κ urbain={KAPPA_URBAN} km²/an")
     print(f"  r={R_GROWTH} an⁻¹  |  c* = {c_star:.2f} km/an")
     print(f"  K côte={K_COAST} → rural={K_RURAL} → bocage={K_FOREST} ind/km²")
     print(f"  méthode : {args.method}  |  θ = {args.theta}")
     print(f"  dt={args.dt} an  |  {args.nsteps} pas  |  T={T_total:.0f} ans")
-    print(f"  DDLs={problem['num_dofs']}  |  stabilité : dt·r={args.dt*R_GROWTH:.2f} < 1 ✓")
+    print(f"  DDLs={problem['num_dofs']}  |  stabilité : dt·r={args.dt*R_GROWTH:.2f} < 1 ")
     print(f"{'═' * 62}\n")
     
     results = run_simulation(

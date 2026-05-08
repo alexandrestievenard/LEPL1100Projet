@@ -54,24 +54,24 @@ python runsimulation.py [OPTIONS]
 | `--nsteps` | `600` | Nombre de pas de temps, par exemple `600 × 0.1 = 60 ans` |
 | `--theta` | `1.0` | Paramètre θ du schéma : `1.0` pour Euler implicite, `0.5` pour Crank-Nicolson |
 | `--save_every` | `5` | Sauvegarde un snapshot tous les N pas |
-| `--live` | désactivé | Active l’affichage interactif en temps réel |
+| `--no_live` | désactivé | Désactive l’affichage interactif en temps réel |
 | `--no_visu` | désactivé | Désactive la génération du GIF final |
-| `--show_mesh` | désactivé | Affiche le maillage du domaine |
+| `--no_mesh` | désactivé | Désactive l'affichage du maillage du domaine |
 
 ---
 
 ## Exemples de commandes
 
+### Cycle de simulation :
+```bash
+python runsimulation.py
+```
+-> affichage du maillage -> affichage de la simulation en live après fermeture du maillage -> génération du gif après fermeture de la simulation en live (attendre un peu !) -> gif généré dans simulation.gif
+
 ### Simulation standard recommandée
 
 ```bash
 python runsimulation.py --method imex --dt 0.1 --nsteps 600
-```
-
-### Simulation avec visualisation en temps réel
-
-```bash
-python runsimulation.py --method imex --live
 ```
 
 ### Simulation avec Newton-Raphson
@@ -99,8 +99,6 @@ Le programme génère les résultats suivants :
   - évolution de `u_max`
   - fraction du domaine envahie
   - densité moyenne par ville
-- Mode `--live` :
-  - visualisation interactive pendant le calcul
 
 ---
 
